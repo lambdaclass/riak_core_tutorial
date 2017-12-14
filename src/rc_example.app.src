@@ -1,0 +1,18 @@
+{application, rc_example,
+ [{description, "An OTP application"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, { rc_example_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    lager,
+    riak_core
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, []},
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
