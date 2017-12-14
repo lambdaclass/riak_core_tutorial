@@ -1,7 +1,16 @@
-# rc_example
+# riak_core example
 
-An OTP application
+A basic example of a riak_core application, using with the most
+recent version of the [riak_core_ng fork](https://hex.pm/packages/riak_core_ng)
+and running on Erlang/OTP 20 with rebar3.
 
+This example was largely based in the
+[Little Riak Core Book](https://marianoguerra.github.io/little-riak-core-book/)
+and the
+[Create a riak_core application in Elixir](https://medium.com/@GPad/create-a-riak-core-application-in-elixir-part-1-41354c1f26c3)
+series.
+
+## Usage
 Run on three separate terminals:
 
 ``` shell
