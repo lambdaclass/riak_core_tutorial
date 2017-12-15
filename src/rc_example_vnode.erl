@@ -21,12 +21,26 @@ start_vnode(I) ->
   riak_core_vnode_master:get_vnode_pid(I, ?MODULE).
 
 init([Partition]) ->
-  {ok, #{partition => Partition}}.
+  {ok, #{partition => Partition, data => #{}}}.
 
 %% Sample command: respond to a ping
-handle_command(ping, _Sender, #{partition := Partition} = State) ->
+handle_command(ping, _Sender, State = #{partition := Partition}) ->
   lager:info("Reived ping comand ~p", [Partition]),
   {reply, {pong, Partition}, State};
+
+handle_command({put, Key, Value}, _Sender, State = #{data := Data}) ->
+  lager:debug("PUT ~p:~p", [Key, Value]),
+  NewData = Data#{Key => Value},
+  {reply, ok, State#{data => NewData}};
+
+handle_command({get, Key}, _Sender, State = #{data := Data}) ->
+  lager:debug("GET ~p", [Key]),
+  {reply, maps:get(Key, Data, not_found), State};
+
+handle_command({delete, Key}, _Sender, State = #{data := Data}) ->
+  lager:debug("DELETE ~p", [Key]),
+  NewData = maps:remove(Key, Data),
+  {reply, maps:get(Key, Data, not_found), State#{data => NewData}};
 
 handle_command(Message, _Sender, State) ->
   lager:warning("unhandled_command ~p", [Message]),
