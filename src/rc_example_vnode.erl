@@ -1,5 +1,8 @@
 -module(rc_example_vnode).
+
 -behaviour(riak_core_vnode).
+
+-include_lib("riak_core/include/riak_core_vnode.hrl").
 
 -export([start_vnode/1,
          init/1,
@@ -46,8 +49,34 @@ handle_command(Message, _Sender, State) ->
   lager:warning("unhandled_command ~p", [Message]),
   {noreply, State}.
 
-handle_handoff_command(_Message, _Sender, State) ->
-  {noreply, State}.
+%% handle_handoff_command will be called when commands come in during
+%% handoff. These can be regular commands (i.e. get, put, delete) or the
+%% special ?FOLD_REQ which contains the fold function that's to be used to
+%% to pass this vnode's data to the target vnode.
+%%
+%% See for reference:
+%% https://github.com/basho/riak_core/blob/74f88d3838814c0a1ac10b10e72bd1b9056b987d/src/riak_core_vnode.erl#L283-L310
+%% https://github.com/basho/riak_kv/blob/d5cfe62d8f0ff36ead2019bde7a08cdd33fd3764/src/riak_kv_vnode.erl#L974-L984
+handle_handoff_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, _Sender,
+                       State = #{data := Data}) ->
+  %% this fold is synchronous, so even if a command can come in during the entire
+  %% handoff process, we can safely assume that the state won't be modified
+  %% concurrently with the fold
+  lager:debug("Received fold request for handoff"),
+  Result = maps:fold(FoldFun, Acc0, Data),
+  {reply, Result, State};
+
+handle_handoff_command({get, Key}, Sender, State) ->
+  %% if this vnode receives the get, means the new target didn't take over yet
+  %% i.e. this vnode still has the most up to date data, and cand handle locally
+  lager:debug("GET during handoff, handling locally ~p", [Key]),
+  handle_command({get, Key}, Sender, State);
+
+handle_handoff_command(Message, Sender, State) ->
+  %% write requests (put and delete) should be forwarded to the new partition
+  %% owner vnode, but also applied locally, so we can keep serving gets
+  {reply, _Result, NewState} = handle_command(Message, Sender, State),
+  {forward, NewState}.
 
 handoff_starting(_TargetNode, State) ->
   {true, State}.
@@ -64,8 +93,9 @@ handle_handoff_data(_Data, State) ->
 encode_handoff_item(_ObjectName, _ObjectValue) ->
   <<>>.
 
-is_empty(State) ->
-  {true, State}.
+is_empty(State = #{data := Data}) ->
+  IsEmpty = maps:size(Data) == 0,
+  {IsEmpty, State}.
 
 delete(State) ->
   {ok, State}.
