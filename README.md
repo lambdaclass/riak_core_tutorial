@@ -32,3 +32,14 @@ Check the ring status:
 ``` erlang
 (rc_example3@127.0.0.1)4> rc_example:ring_status().
 ```
+
+Try the key/value commands:
+
+``` erlang
+(rc_example1@127.0.0.1)1> rc_example:put(k1, v1).
+ok
+(rc_example1@127.0.0.1)2> rc_example:put(k2, v2).
+ok
+(rc_example2@127.0.0.1)1> rc_example:get(k2).
+v2
+```
