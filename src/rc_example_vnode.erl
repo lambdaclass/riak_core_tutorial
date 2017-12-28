@@ -28,25 +28,25 @@ init([Partition]) ->
 
 %% Sample command: respond to a ping
 handle_command(ping, _Sender, State = #{partition := Partition}) ->
-  lager:info("Reived ping comand ~p", [Partition]),
+  log("Reived ping comand", State),
   {reply, {pong, Partition}, State};
 
 handle_command({put, Key, Value}, _Sender, State = #{data := Data}) ->
-  lager:debug("PUT ~p:~p", [Key, Value]),
+  log("PUT ~p:~p", [Key, Value], State),
   NewData = Data#{Key => Value},
   {reply, ok, State#{data => NewData}};
 
 handle_command({get, Key}, _Sender, State = #{data := Data}) ->
-  lager:debug("GET ~p", [Key]),
+  log("GET ~p", [Key], State),
   {reply, maps:get(Key, Data, not_found), State};
 
 handle_command({delete, Key}, _Sender, State = #{data := Data}) ->
-  lager:debug("DELETE ~p", [Key]),
+  log("DELETE ~p", [Key], State),
   NewData = maps:remove(Key, Data),
   {reply, maps:get(Key, Data, not_found), State#{data => NewData}};
 
 handle_command(Message, _Sender, State) ->
-  lager:warning("unhandled_command ~p", [Message]),
+  lager:warning("unhandled_commanod ~p", [Message]),
   {noreply, State}.
 
 %% handle_handoff_command will be called when commands come in during
@@ -62,14 +62,14 @@ handle_handoff_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, _Sender,
   %% this fold is synchronous, so even if a command can come in during the entire
   %% handoff process, we can safely assume that the state won't be modified
   %% concurrently with the fold
-  lager:debug("Received fold request for handoff"),
+  log("Received fold request for handoff", State),
   Result = maps:fold(FoldFun, Acc0, Data),
   {reply, Result, State};
 
 handle_handoff_command({get, Key}, Sender, State) ->
   %% if this vnode receives the get, means the new target didn't take over yet
   %% i.e. this vnode still has the most up to date data, and cand handle locally
-  lager:debug("GET during handoff, handling locally ~p", [Key]),
+  log("GET during handoff, handling locally ~p", [Key], State),
   handle_command({get, Key}, Sender, State);
 
 handle_handoff_command(Message, Sender, State) ->
@@ -79,6 +79,7 @@ handle_handoff_command(Message, Sender, State) ->
   {forward, NewState}.
 
 handoff_starting(_TargetNode, State) ->
+  log("starting handoff", State),
   {true, State}.
 
 is_empty(State = #{data := Data}) ->
@@ -86,6 +87,7 @@ is_empty(State = #{data := Data}) ->
   {IsEmpty, State}.
 
 handoff_cancelled(State) ->
+  log("handoff cancelled", State),
   {ok, State}.
 
 encode_handoff_item(Key, Value) ->
@@ -93,15 +95,16 @@ encode_handoff_item(Key, Value) ->
 
 handle_handoff_data(BinData, State = #{data := Data}) ->
   {Key, Value} = erlang:binary_to_term(BinData),
+  log("received handoff data ~p", [{Key, Value}], State),
   NewData = Data#{Key => Value},
   {reply, ok, State#{data => NewData}}.
 
 handoff_finished(_TargetNode, State) ->
+  log("finished handoff", State),
   {ok, State}.
 
 delete(State) ->
-  %% FIXME add a log function that always includes the partition as a prefix, use everywhere
-  lager:debug("deleting the vnode data."),
+  log("deleting the vnode data", State),
   {ok, State#{data => #{}}}.
 
 handle_coverage(_Req, _KeySpaces, _Sender, State) ->
@@ -111,4 +114,15 @@ handle_exit(_Pid, _Reason, State) ->
   {noreply, State}.
 
 terminate(_Reason, _State) ->
+  ok.
+
+%%% internal
+log(String, State) ->
+  log(String, [], State).
+
+%% same as lager:info but prepends the partition
+log(String, Args, #{partition := Partition}) ->
+  String2 = "[~p] " ++ String,
+  Args2 = [Partition | Args],
+  lager:info(String2, Args2),
   ok.
