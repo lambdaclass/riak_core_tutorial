@@ -55,7 +55,7 @@ handle_command(Message, _Sender, State) ->
 %% to pass this vnode's data to the target vnode.
 %%
 %% See for reference:
-%% https://github.com/basho/riak_core/blob/74f88d3838814c0a1ac10b10e72bd1b9056b987d/src/riak_core_vnode.erl#L283-L310
+%% https://github.com/Kyorai/riak_core/blob/faf04f4820aff5bc876f79609fa838e1c86c0fb0/src/riak_core_vnode.erl#L312-L339
 %% https://github.com/basho/riak_kv/blob/d5cfe62d8f0ff36ead2019bde7a08cdd33fd3764/src/riak_kv_vnode.erl#L974-L984
 handle_handoff_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, _Sender,
                        State = #{data := Data}) ->
@@ -81,24 +81,28 @@ handle_handoff_command(Message, Sender, State) ->
 handoff_starting(_TargetNode, State) ->
   {true, State}.
 
-handoff_cancelled(State) ->
-  {ok, State}.
-
-handoff_finished(_TargetNode, State) ->
-  {ok, State}.
-
-handle_handoff_data(_Data, State) ->
-  {reply, ok, State}.
-
-encode_handoff_item(_ObjectName, _ObjectValue) ->
-  <<>>.
-
 is_empty(State = #{data := Data}) ->
   IsEmpty = maps:size(Data) == 0,
   {IsEmpty, State}.
 
-delete(State) ->
+handoff_cancelled(State) ->
   {ok, State}.
+
+encode_handoff_item(Key, Value) ->
+  erlang:term_to_binary({Key, Value}).
+
+handle_handoff_data(BinData, State = #{data := Data}) ->
+  {Key, Value} = erlang:binary_to_term(BinData),
+  NewData = Data#{Key => Value},
+  {reply, ok, State#{data => NewData}}.
+
+handoff_finished(_TargetNode, State) ->
+  {ok, State}.
+
+delete(State) ->
+  %% FIXME add a log function that always includes the partition as a prefix, use everywhere
+  lager:debug("deleting the vnode data."),
+  {ok, State#{data => #{}}}.
 
 handle_coverage(_Req, _KeySpaces, _Sender, State) ->
   {stop, not_implemented, State}.
