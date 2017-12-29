@@ -7,7 +7,9 @@
          ring_status/0,
          put/2,
          get/1,
-         delete/1
+         delete/1,
+         keys/0,
+         values/0
         ]).
 
 %% @doc Pings a random vnode to make sure communication is functional
@@ -30,9 +32,24 @@ get(Key) ->
 delete(Key) ->
   sync_command(Key, {delete, Key}).
 
+keys() ->
+  coverage_command(keys).
+
+values() ->
+  coverage_command(values).
+
 %% internal
 sync_command(Key, Command) ->
   DocIdx = riak_core_util:chash_key({<<"example">>, term_to_binary(Key)}),
   PrefList = riak_core_apl:get_primary_apl(DocIdx, 1, rc_example),
   [{IndexNode, _Type}] = PrefList,
   riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).
+
+coverage_command(Command) ->
+  Timeout = 5000,
+  {ok, Results} = rc_example_coverage_fsm:run(Command, Timeout),
+
+  %% drop empty vnode results
+  lists:filter(fun({_Partition, _Node, []}) -> false;
+                  (_Result) -> true
+               end, Results).
