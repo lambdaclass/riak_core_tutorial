@@ -15,32 +15,31 @@ run(Request, Timeout) ->
     {ReqId, Val} -> Val
   end.
 
-start_link(ReqId, From, Request, Timeout) ->
-  riak_core_coverage_fsm:start_link(?MODULE, {pid, ReqId, From},
-                                    [ReqId, From, Request, Timeout]).
+start_link(ReqId, ClientPid, Request, Timeout) ->
+  riak_core_coverage_fsm:start_link(?MODULE, {pid, ReqId, ClientPid}, [Request, Timeout]).
 
 %% riak_core_coverage_fsm API
 
-%% TODO log both From and drop extra argument if its the same
-init(_From, [ReqId, From, Request, Timeout]) ->
+init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
   lager:info("Starting coverage request ~p ~p", [ReqId, Request]),
 
   State = #{req_id => ReqId,
-            from => From,
+            from => ClientPid,
             request => Request,
             accum => []},
 
-  %% TODO explain each value
-  {Request,
-   allup,
-   1,
-   1,
-   rc_example,
-   rc_example_vnode_master,
+  %% See https://github.com/Kyorai/riak_core/blob/3.0.9/src/riak_core_coverage_fsm.erl#L45-L63
+  %% for details on each of these elements
+  {Request, %% An opaque data structure that is used by the VNode to implement the specific coverage request.
+   allup,  %% 'all' for all VNodes or 'allup' for all reachable.
+   1, %% replication factor
+   1, %%  number of primary VNodes from the preference list to use
+   rc_example, %% service to use to check for available nodes
+   rc_example_vnode_master, %% The atom to use to reach the vnode master module
    Timeout,
    %% coverage plan was added in the _ng fork
    %% https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f
-   riak_core_coverage_plan,
+   riak_core_coverage_plan, %%  The module which defines create_plan
    State}.
 
 process_results({{_ReqId, {Partition, Node}}, Data},
