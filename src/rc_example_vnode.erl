@@ -107,8 +107,15 @@ delete(State) ->
   log("deleting the vnode data", State),
   {ok, State#{data => #{}}}.
 
-handle_coverage(_Req, _KeySpaces, _Sender, State) ->
-  {stop, not_implemented, State}.
+handle_coverage(keys, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
+  log("Received keys coverage", State),
+  Keys = maps:keys(Data),
+  {reply, {ReqId, Keys}, State};
+
+handle_coverage(values, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
+  log("Received values coverage", State),
+  Values = maps:values(Data),
+  {reply, {ReqId, Values}, State}.
 
 handle_exit(_Pid, _Reason, State) ->
   {noreply, State}.
