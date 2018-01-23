@@ -6,6 +6,8 @@
   {applications,
    [kernel,
     stdlib,
+    recon,
+    sync,
     lager,
     cuttlefish,
     riak_core
