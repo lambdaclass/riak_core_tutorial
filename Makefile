@@ -1,4 +1,4 @@
-.PHONY: dev
+.PHONY: dev1 dev2 dev3 dev4 clean_data
 
 dev1:
 	./rebar3 as dev1 release && _build/dev1/rel/rc_example/bin/rc_example
