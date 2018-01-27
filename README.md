@@ -72,7 +72,7 @@ Basho, the company that originally developed Riak and Riak Core was
 put into receivership in 2017. This introduces some uncertainty about the
 future of these products, although the community has shown interest in
 taking over their maintenance. At the moment of writing,
-that [riak_core_ng](https://github.com/Kyorai/riak_core) fork seems to
+the [riak_core_ng](https://github.com/Kyorai/riak_core) fork seems to
 be the most actively maintained fork of Riak Core and hopefully the work being
 done there will eventually be merged back to the canonical repository.
 
@@ -267,11 +267,126 @@ try removing the _build directory):
 
     $ rebar3 release && _build/default/rel/rc_example/bin/rc_example
 
-### 2. vnode
+### 2. The vnode
 
-link to an explanation of the vnode
+So far we've got a single Erlang node running a release with riak_core
+in it, but we didn't really write any code to test it. So, before
+getting into the distributed aspects of riak_core, let's add the
+simplest possible functionality: a ping command.
 
-start with an empty one, add a ping command
+Recall from the [overview](/#0-riak-core-overview), that the keyspace (the range of all possible
+results of hashing a key) is partitioned, and each partition is assigned to a
+virtual node. The vnode is a worker process, it
+handles incoming requests, known as commands, and it's implemented as
+an OTP behavior. In our initial example
+we'll create an empty vnode, that only needs to handle a ping
+command. A detailed explanation of vnodes can be found [here](https://github.com/rzezeski/try-try-try/tree/master/2011/riak-core-the-vnode).
+
+Let's add a `src/rc_example_vnode.erl` file with all the (empty)
+callbacks from that behavior (this is very similar to the vnode that
+the riak core template produces):
+
+``` erlang
+-module(rc_example_vnode).
+-behaviour(riak_core_vnode).
+
+-export([start_vnode/1,
+         init/1,
+         terminate/2,
+         handle_command/3,
+         is_empty/1,
+         delete/1,
+         handle_handoff_command/3,
+         handoff_starting/2,
+         handoff_cancelled/1,
+         handoff_finished/2,
+         handle_handoff_data/2,
+         encode_handoff_item/2,
+         handle_coverage/4,
+         handle_exit/3]).
+
+start_vnode(I) ->
+    riak_core_vnode_master:get_vnode_pid(I, ?MODULE).
+
+init([Partition]) ->
+    {ok, #{partition => Partition}}.
+
+handle_command(Message, _Sender, State) ->
+    lager:warning("unhandled_command ~p", [Message]),
+    {noreply, State}.
+
+handle_handoff_command(_Message, _Sender, State) ->
+    {noreply, State}.
+
+handoff_starting(_TargetNode, State) ->
+    {true, State}.
+
+handoff_cancelled(State) ->
+    {ok, State}.
+
+handoff_finished(_TargetNode, State) ->
+    {ok, State}.
+
+handle_handoff_data(_Data, State) ->
+    {reply, ok, State}.
+
+encode_handoff_item(_ObjectName, _ObjectValue) ->
+    <<>>.
+
+is_empty(State) ->
+    {true, State}.
+
+delete(State) ->
+    {ok, State}.
+
+handle_coverage(_Req, _KeySpaces, _Sender, State) ->
+    {stop, not_implemented, State}.
+
+handle_exit(_Pid, _Reason, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+```
+
+First off, the `start_vnode` function. This is not a riak_vnode
+behavior callback, but it's nevertheless required for the vnode to work.
+This function isn't documented, and to my knowledge it will always
+have the same implementation: `riak_core_vnode_master:get_vnode_pid(I,
+?MODULE).`, so it could probably be handled internally by
+riak_core. Since it isn't, we copy paste that line everytime ¯\_(ツ)_/¯.
+
+The `init` callback initializes the state of the vnode, much like in a
+gen_server. In the code above we intialize a state map that only
+contains the id of the partition assigned to the vnode.
+
+The next interesting callback is `handle_command`, which as you may
+expect handles the requests that are assigned to the vnode. The nature
+of the command will be defined by the Message parameter. In the case of
+our simple ping command, we'll add a new `handle_command` clause that
+just replies with the partition id of the vnode:
+
+``` erlang
+handle_command(ping, _Sender, State = #{partition := Partition}) ->
+  {reply, {pong, Partition}, State};
+
+handle_command(Message, _Sender, State) ->
+    lager:warning("unhandled_command ~p", [Message]),
+    {noreply, State}.
+```
+
+We'll cover the rest of the callbacks in the following sections.
+
+TODO:
+- add public api file and ping implementation
+- explain api implementation line by line
+
+https://marianoguerra.github.io/little-riak-core-book/how-a-command-works.html
+
+- add and explain code in supervisor
+- add and explain code in app start
+
+- run and test ping
 
 ### 3. setup the cluster, basic console commands
 
