@@ -39,8 +39,11 @@ values() ->
   coverage_command(values).
 
 %% internal
+hash_key(Key) ->
+  riak_core_util:chash_key({<<"rc_example">>, term_to_binary(Key)}).
+
 sync_command(Key, Command) ->
-  DocIdx = riak_core_util:chash_key({<<"example">>, term_to_binary(Key)}),
+  DocIdx = hash_key(Key),
   PrefList = riak_core_apl:get_primary_apl(DocIdx, 1, rc_example),
   [{IndexNode, _Type}] = PrefList,
   riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).

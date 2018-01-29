@@ -277,14 +277,15 @@ simplest possible functionality: a ping command.
 Recall from the [overview](/#0-riak-core-overview), that the keyspace (the range of all possible
 results of hashing a key) is partitioned, and each partition is assigned to a
 virtual node. The vnode is a worker process, it
-handles incoming requests, known as commands, and it's implemented as
+handles incoming requests known as commands and is implemented as
 an OTP behavior. In our initial example
-we'll create an empty vnode, that only needs to handle a ping
+we'll create an empty vnode that only knows how to handle a ping
 command. A detailed explanation of vnodes can be found [here](https://github.com/rzezeski/try-try-try/tree/master/2011/riak-core-the-vnode).
 
-Let's add a `src/rc_example_vnode.erl` file with all the (empty)
-callbacks from that behavior (this is very similar to the vnode that
-the riak core template produces):
+#### The riak_vnode behavior
+
+Let's add a `src/rc_example_vnode.erl` module that will implement the
+`riak_core_vnode` behavior:
 
 ``` erlang
 -module(rc_example_vnode).
@@ -311,10 +312,37 @@ start_vnode(I) ->
 init([Partition]) ->
     {ok, #{partition => Partition}}.
 
+handle_command(ping, _Sender, State = #{partition := Partition}) ->
+  {reply, {pong, Partition}, State};
+
 handle_command(Message, _Sender, State) ->
     lager:warning("unhandled_command ~p", [Message]),
     {noreply, State}.
 
+```
+
+First off, the `start_vnode` function. This is not a riak_vnode
+behavior callback, but it's nevertheless required for the vnode to work.
+This function isn't documented, and to my knowledge it will always
+have the same implementation: `riak_core_vnode_master:get_vnode_pid(I,
+?MODULE).`, so it could probably be handled internally by
+riak\_core. Since it isn't, we copy paste that line everytime ¯\\\_(ツ)_/¯
+
+The `init` callback initializes the state of the vnode, much like in a
+gen_server. In the code above we intialize a state map that only
+contains the id of the partition assigned to the vnode.
+
+The next interesting callback is `handle_command`, which as you may
+expect handles the requests that are assigned to the vnode. The nature
+of the command will be defined by the Message parameter. In the case of
+our simple ping command, we add a new `handle_command` clause that
+just replies with the partition id of the vnode.
+
+That's all we need to get started, the rest of the `riak_vnode`
+callbacks will have dummy implementations. We'll get back at those in the
+following sections.
+
+``` erlang
 handle_handoff_command(_Message, _Sender, State) ->
     {noreply, State}.
 
@@ -349,44 +377,141 @@ terminate(_Reason, _State) ->
     ok.
 ```
 
-First off, the `start_vnode` function. This is not a riak_vnode
-behavior callback, but it's nevertheless required for the vnode to work.
-This function isn't documented, and to my knowledge it will always
-have the same implementation: `riak_core_vnode_master:get_vnode_pid(I,
-?MODULE).`, so it could probably be handled internally by
-riak_core. Since it isn't, we copy paste that line everytime ¯\_(ツ)_/¯.
-
-The `init` callback initializes the state of the vnode, much like in a
-gen_server. In the code above we intialize a state map that only
-contains the id of the partition assigned to the vnode.
-
-The next interesting callback is `handle_command`, which as you may
-expect handles the requests that are assigned to the vnode. The nature
-of the command will be defined by the Message parameter. In the case of
-our simple ping command, we'll add a new `handle_command` clause that
-just replies with the partition id of the vnode:
+#### Application and supervisor setup
+Before moving on we need to add some boilerplate code for riak_core to
+find and manage our example vnode. Update the `start` callback in
+`src/rc_example_app.erl`:
 
 ``` erlang
-handle_command(ping, _Sender, State = #{partition := Partition}) ->
-  {reply, {pong, Partition}, State};
+start(_StartType, _StartArgs) ->
+  ok = riak_core:register([{vnode_module, rc_example_vnode}]),
+  ok = riak_core_node_watcher:service_up(rc_example, self()),
 
-handle_command(Message, _Sender, State) ->
-    lager:warning("unhandled_command ~p", [Message]),
-    {noreply, State}.
+  rc_example_sup:start_link().
 ```
 
-We'll cover the rest of the callbacks in the following sections.
+The first line initialises the ring telling riak_core to use
+`rc_example_vnode` as a vnode module. The second one starts the
+node_watcher, a process responsible for tracking the status of nodes within a riak_core cluster.
 
-TODO:
-- add public api file and ping implementation
-- explain api implementation line by line
+We also need to update the supervisor in `src/rc_example_sup.erl`, to
+start the vnode_master, the process that coordinates the
+distribution of work within the physical node: it starts all the
+worker vnodes, receives all the requests on that particular physical
+node and routes each of them to the vnode that should handle it.
 
-https://marianoguerra.github.io/little-riak-core-book/how-a-command-works.html
+``` erlang
+init([]) ->
+  VMaster = {rc_example_vnode_master,
+             {riak_core_vnode_master, start_link, [rc_example_vnode]},
+             permanent, 5000, worker, [riak_core_vnode_master]},
 
-- add and explain code in supervisor
-- add and explain code in app start
+  {ok, {{one_for_one, 5, 10}, [VMaster]}}.
+```
 
-- run and test ping
+#### Sending commands to the vnode
+
+So far we have a vnode that knows how to respond to an incoming ping
+request, but we still need an API to be able to send that
+request. We'll add a `src/rc_example.erl` file that will contain the
+public interface to our application:
+
+``` erlang
+-module(rc_example).
+
+-export([ping/0]).
+
+ping()->
+  Key = os:timestamp(),
+  DocIdx = hash_key(Key),
+  PrefList = riak_core_apl:get_primary_apl(DocIdx, 1, rc_example),
+  [{IndexNode, _Type}] = PrefList,
+  Command = ping,
+  riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).
+
+%% internal
+
+hash_key(Key) ->
+  riak_core_util:chash_key({<<"rc_example">>, term_to_binary(Key)}).
+```
+
+Let's go over the `ping()` implementation line by line. As stated
+before, most operations will be performed over a single object (with the
+exception of aggregation operations, like listing all available keys
+in a key/value store). That object is usually identified by some key,
+which will be hashed to decide what partition (that is what vnode at
+what physical node) should receive
+the request. In the case of `ping`, there isn't any actual object
+involved, and thus no key, but we make a random one by using
+`os:timestamp()`. The nature of the hashing algorithm makes it so it
+distributes values uniformly over the ring, so each new timestamp
+should be assigned to a random partition of the ring.
+
+The `hash_key` helper calls `riak_core_util:chash_key` to produce the
+hash of the key. Note `chash_key` receives a tuple of two binaries;
+the first element is called the bucket, a value
+riak_core will use to namespace your keys; you can choose to have a
+single one per application, or many, according to your needs.
+
+The result of the hash is passed to `riak_core_apl:get_primary_apl`
+which returns an Active Preference List (APL) for the given key, this
+is a list of active vnodes that can handle that request. The amount of
+offered vnodes will be determined by the second argument of the
+function. We can try these functions in the release shell to get a
+better sense of how they work:
+
+``` erlang
+(rc_example@127.0.0.1)1> riak_core_util:chash_key({<<"rc_example">>, term_to_binary(os:timestamp())}).
+<<233,235,224,243,192,63,109,102,255,125,189,206,164,247,
+  117,34,94,199,14,184>>
+(rc_example@127.0.0.1)2> K1 = riak_core_util:chash_key({<<"rc_example">>, term_to_binary(os:timestamp())}).
+<<190,175,151,200,144,123,229,205,94,16,209,140,252,108,
+  247,20,238,31,6,82>>
+(rc_example1@127.0.0.1)3> riak_core_apl:get_primary_apl(K1, 1, rc_example).
+[{{1096126227998177188652763624537212264741949407232,
+   'rc_example@127.0.0.1'},
+  primary}]
+(rc_example1@127.0.0.1)4> K2 = riak_core_util:chash_key({<<"rc_example">>, term_to_binary(os:timestamp())}).
+<<113,53,13,80,4,131,62,95,63,164,211,74,145,83,189,77,
+  254,224,190,198>>
+(rc_example@127.0.0.1)5> riak_core_apl:get_primary_apl(K2, 1, rc_example).
+[{{662242929415565384811044689824565743281594433536,
+   'rc_example@127.0.0.1'},
+  primary}]
+(rc_example@127.0.0.1)6> riak_core_apl:get_primary_apl(K2, 3, rc_example).
+[{{662242929415565384811044689824565743281594433536,
+   'rc_example@127.0.0.1'},
+  primary},
+ {{685078892498860742907977265335757665463718379520,
+   'rc_example@127.0.0.1'},
+  primary},
+ {{707914855582156101004909840846949587645842325504,
+   'rc_example@127.0.0.1'},
+  primary}]
+```
+
+We get different partitions every time, always on the same physical
+node (because we're still running a single one).
+
+The last line of `ping/0` sends the `ping` command to the selected
+vnode through the `riak_core_vnode_master`. The function used to do so
+is `sync_spawn_command`, which acts a bit like a `gen_server:call` in
+the sense that it blocks the calling process waiting for the
+response. There are other functions to send commands to a vnode:
+`riak_core_vnode_master:command/3` (which works asynchronously like
+`gen_server:cast`) and `riak_core_vnode_master:sync_command/3` (which
+is like `sync_spawn_command` but blocks the vnode_master process).
+
+You can find more details of the functions used in this
+section [here](http://efcasado.github.io/riak-core_intro/). To wrap up
+let's run our `ping` function from the shell:
+
+``` erlang
+(rc_example@127.0.0.1)1> rc_example:ping().
+{pong,479555224749202520035584085735030365824602865664}
+(rc_example@127.0.0.1)2> rc_example:ping().
+{pong,502391187832497878132516661246222288006726811648}
+```
 
 ### 3. setup the cluster, basic console commands
 
