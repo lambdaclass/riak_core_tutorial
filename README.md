@@ -66,6 +66,13 @@ limited to data stores).
 In practical terms, Riak Core is an Erlang/OTP application, and most
 of the user defined work is done in the `riak_core_vnode` behavior.
 
+### What's riak core useful for
+
+As you can see, riak_core provides the basic building blocks to build distributed services, consistent hashing, routing, support for sharding and replicating, distributed queries, etc. They need not all be used. For example, a game server which handles requests from players could partition players to handle load, and ensure that players requests are always handled on the same vnode to ensure data locality.
+
+A distributed batch job handling system could also use consistent hashing and routing to ensure jobs from the same batch are always handled by the same node, or distributed the jobs across several partitions and then use the distributed map-reduce queries to gather results.
+
+
 ### About this tutorial
 
 Basho, the company that originally developed Riak and Riak Core was
@@ -728,9 +735,3 @@ explain what we've learned digging the code comments
 ### 8. redundancy and fault tolerance
 
 TODO #6
-
-### 9. Other uses
-
-As you can see, riak_core provides the basic building blocks to build distributed services, consistent hashing, routing, support for sharding and replicating, distributed queries, etc. They need not all be used. For example, a game server which handles requests from players could partition players to handle load, and ensure that players requests are always handled on the same vnode to ensure data locality.
-
-A distributed batch job handling system could also use consistent hashing and routing to ensure jobs from the same batch are always handled by the same node, or distributed the jobs across several partitions and then use the distributed map-reduce queries to gather results.
