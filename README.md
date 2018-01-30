@@ -55,7 +55,12 @@ v2
 systems framework used by the [Riak data store](https://github.com/basho/riak)
 to distribute data and scale. More generally, it can be thought of as
 a toolkit for building distributed, scalable, fault-tolerant
-applications. What makes Riak Core so interesting and useful is that it implements
+applications. In practical terms, Riak Core is an Erlang/OTP application, and most
+of the user defined work is done in the `riak_core_vnode` behavior.
+
+### When to use Riak Core
+
+What makes Riak Core so interesting and useful is that it implements
 the ideas of the
 [Amazon's Dyamo](https://en.wikipedia.org/wiki/Dynamo_(storage_system))
 architecture and exposes its infrastructure as
@@ -63,15 +68,9 @@ a reusable library, allowing to easily apply them in any context that
 can benefit from decentralized distribution of work (including but not
 limited to data stores).
 
-In practical terms, Riak Core is an Erlang/OTP application, and most
-of the user defined work is done in the `riak_core_vnode` behavior.
+As you will see, it provides the basic blocks to build distributed services, consistent hashing, routing, support for sharding and replicating, distributed queries, etc. They need not all be used. For example, a game server which handles requests from players could partition players to handle load, and ensure that players requests are always handled on the same vnode to ensure data locality.
 
-### What's riak core useful for
-
-As you can see, riak_core provides the basic building blocks to build distributed services, consistent hashing, routing, support for sharding and replicating, distributed queries, etc. They need not all be used. For example, a game server which handles requests from players could partition players to handle load, and ensure that players requests are always handled on the same vnode to ensure data locality.
-
-A distributed batch job handling system could also use consistent hashing and routing to ensure jobs from the same batch are always handled by the same node, or distributed the jobs across several partitions and then use the distributed map-reduce queries to gather results.
-
+A distributed batch job handling system could also use consistent hashing and routing to ensure jobs from the same batch are always handled by the same node, or distribute the jobs across several partitions and then use the distributed map-reduce queries to gather results.
 
 ### About this tutorial
 
