@@ -831,10 +831,135 @@ TODO #7
 
 ### 6. Coverage commands
 
-keys, values
-explain the gotcha of breaking change in the coverage fsm
+So far we've been working with commands that operate over a single
+object, like a single Key in a Key/Value store. In those cases the Key
+was hashed and the key hash determined the vnode responsible for
+handling the operation. In the case of the ping command, as discussed,
+we didn't have a key but we faked one by using the current timestamp.
 
-add a test
+There is another kind of command, one that involves all the vnodes in
+the ring. What happens, for example, if we want to list all the
+Keys in our Key/Value store? Each vnode contains a subset of the Keys
+so the to get the full list we need to ask all the vnodes and join the
+results. This is what coverage commands consist of: riak_core sends a
+command to all of the vnodes then process the results as they arrive.
+
+In this section we're going to implement two new commands: `keys` and
+`values`, which as you may guess return the list of keys and values
+currently present in the datastore.
+
+#### handle coverage on the vnode
+
+The vnode is the easy part. Each vnode just needs to return the list
+of Keys or Values it contains in the `data` field of its state. This
+is done in the `handle_coverage` command:
+
+``` erlang
+handle_coverage(keys, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
+  lager:info("Received keys coverage"),
+  Keys = maps:keys(Data),
+  {reply, {ReqId, Keys}, State};
+
+handle_coverage(values, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
+  lager:info("Received values coverage"),
+  Values = maps:values(Data),
+  {reply, {ReqId, Values}, State}.
+```
+
+#### The coverage FSM
+We need to introduce a new component, the one that will be in charge
+of managing the coverage command, that is of starting it and gathering
+the results sent from each of the vnodes. riak_core provides the
+`riak_core_coverage_fsm` behavior for this purpose.
+
+Let's create a `src/rc_example_coverage_fsm.erl` module implementing
+that behavior and go over each of its functions:
+
+``` erlang
+-module(rc_example_coverage_fsm).
+
+-behaviour(riak_core_coverage_fsm).
+
+-export([start_link/4,
+         init/2,
+         process_results/2,
+         finish/2]).
+
+start_link(ReqId, ClientPid, Request, Timeout) ->
+  riak_core_coverage_fsm:start_link(?MODULE, {pid, ReqId, ClientPid},
+  [Request, Timeout]).
+```
+
+So far, nothing very special: the start_link will be called by a
+supervisore (see next section) to start the process, and the
+parameters are more or less forwarded to
+`riak_core_coverage_fsm:start_link`.
+
+``` erlang
+init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
+  lager:info("Starting coverage request ~p ~p", [ReqId, Request]),
+
+  State = #{req_id => ReqId,
+            from => ClientPid,
+            request => Request,
+            accum => []},
+
+  {Request, allup, 1, 1, rc_example, %% service to use to check for available nodes
+   rc_example_vnode_master, %% The atom to use to reach the vnode master module
+   Timeout,
+   %% coverage plan was added in the _ng fork
+   %% https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f
+   riak_core_coverage_plan, %%  The module which defines create_plan
+   State}.
+```
+
+In `init`, we initialize the process state as usual. We create a state
+map where we put request metadata, the client process id (so we can
+later reply with the result of the command) and an accumulator list
+that we will update with the results coming from each vnode.
+
+`init` returns a big tuple with a bunch of parameters that control how
+the coverage command should work. Let's briefly explain what each of
+them is (mostly taken from
+[here](https://github.com/Kyorai/riak_core/blob/3.0.9/src/riak_core_coverage_fsm.erl#L45-L63);
+you'll have to dig around for more details):
+
+* Request: an opaque data structure representing the command to be
+  handled by the vnodes. In our case it will just be either of the `keys` or
+  `values` atoms.
+* VNodeSelector: an atom that specifies whether we want to run the
+  command in all vnodes (`all`) or only those reachable (`allup`).
+* ReplicationFactor: used to accurately create a minimal covering set
+  of vnodes.
+* PrimaryVNodeCoverage: The number of primary VNodes from the
+  preference list to use in creating the coverage plan. Typically just
+  1.
+* NodeCheckService: the service to use to check for available
+  nodes. AFAIK this is the same as the atom passed to the node_watcher
+  at application startup.
+* VNodeMaster: The atom to use to reach the vnode master module (`rc_example_vnode_master`).
+* Timeout: timeout of the coverage request.
+* PlannerMod: a module that defines a `create_plan` function, which is
+  used to define how the cluster vnodes should be covered by the
+  command. This will usually be `riak_core_coverage_plan`.
+* State: the initial state for the module.
+
+Note that the PlannerMode argument was [introduced in the `riak_core_ng`
+fork](https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f) and
+isn't present in the original basho codebase (thus, if you
+are using an older riak_core version you should omit that parameter).
+
+#### supervision
+* add new supervisor, add to global supervisor
+* explain run/start_fsm api
+
+#### Putting it all together
+
+* add keys, values and coverage helper
+* run in shell
+
+#### testing
+TODO
 
 ### 7. Handoff
 
