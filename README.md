@@ -642,7 +642,7 @@ ring_status() ->
 
 Now open three terminals and run one of these commands on each:
 
-``` erlang
+``` shell
 $ make dev1
 $ make dev2
 $ make dev3
