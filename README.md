@@ -717,22 +717,113 @@ receive the command.
 
 ### 4. Building a distributed Key/Value store
 
-Now that we have the project layout and and distribution setup we can
+Now that we have the project layout and distribution setup we can
 start working on our in-memory Key/Value store. As you may imagine,
 this means modifying our worker vnode to support a new set of
 commands: `put`, `get` and `delete`. Here are the relevant parts:
 
-TODO
+``` erlang
+init([Partition]) ->
+  {ok, #{partition => Partition, data => #{}}}.
 
-* add state to vnode
-* add new handle_command clauses
+handle_command({put, Key, Value}, _Sender, State = #{data := Data}) ->
+  lager:info("PUT ~p:~p", [Key, Value]),
+  NewData = Data#{Key => Value},
+  {reply, ok, State#{data => NewData}};
 
-* add new functions to rc_example api
-* test the new functions in the shell
+handle_command({get, Key}, _Sender, State = #{data := Data}) ->
+  lager:info("GET ~p", [Key]),
+  {reply, maps:get(Key, Data, not_found), State};
+
+handle_command({delete, Key}, _Sender, State = #{data := Data}) ->
+  lager:info("DELETE ~p", [Key]),
+  NewData = maps:remove(Key, Data),
+  {reply, maps:get(Key, Data, not_found), State#{data => NewData}};
+```
+
+In `init`, we update our state map to include a `data` map; we'll use
+it as our humble data store. Then we
+add new `handle_command` clauses for each operation: put, get,
+set. The command is received as a named tuple and the result is returned in
+a `reply`, like in a gen_server.
+
+Just like we did with `ping`, we'll create public functions in
+`src/rc_example.erl` to execute the new commands:
+
+``` erlang
+-module(rc_example).
+
+-export([ping/0,
+         ring_status/0,
+         put/2,
+         get/1,
+         delete/1]).
+
+ping() ->
+  sync_command(os:timestamp(), ping).
+
+ring_status() ->
+  {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+  riak_core_ring:pretty_print(Ring, [legend]).
+
+put(Key, Value) ->
+  sync_command(Key, {put, Key, Value}).
+
+get(Key) ->
+  sync_command(Key, {get, Key}).
+
+delete(Key) ->
+  sync_command(Key, {delete, Key}).
+
+%% internal
+hash_key(Key) ->
+  riak_core_util:chash_key({<<"rc_example">>, term_to_binary(Key)}).
+
+sync_command(Key, Command) ->
+  DocIdx = hash_key(Key),
+  PrefList = riak_core_apl:get_primary_apl(DocIdx, 1, rc_example),
+  [{IndexNode, _Type}] = PrefList,
+  riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).
+```
+
+The hashing, vnode selection and command execution is the same
+in all cases, so it was extracted into its own `sync_command` helper
+function.
+
+Let's test the new commands. Stop the three nodes if you are still
+running them, and run `make dev1`, `make dev2` and `make dev3` to refresh
+the code of the releases (you'll note that the nodes join the cluster
+without the need to call `riak_core:join` again). In any of the
+shells you can try our Key/Value store:
+
+``` erlang
+(rc_example1@127.0.0.1)1> rc_example:put(key1, value1).
+13:12:53.291 [info] PUT key1:value1
+ok
+(rc_example1@127.0.0.1)2> rc_example:put(key2, value2).
+13:12:59.602 [info] PUT key2:value2
+ok
+(rc_example1@127.0.0.1)3> rc_example:get(key1).
+13:13:30.160 [info] GET key1
+value1
+(rc_example1@127.0.0.1)4> rc_example:delete(key1).
+13:13:37.984 [info] DELETE key1
+value1
+(rc_example1@127.0.0.1)5> rc_example:get(key1).
+not_found
+13:13:43.392 [info] GET key1
+(rc_example1@127.0.0.1)6> rc_example:put(key3453, value3453).
+(rc_example1@127.0.0.1)7> rc_example:get(key3453).
+value3453
+```
+
+In the example above, keys `key1` and `key2` are stored on vnodes that
+reside in the first node (and thus we get the log output in the
+shell of rc_example1), while `key3453` is on another one.
 
 As you can see, even if the initial setup can be a little burdensome,
 you can get distribution of work and fault-tolerance with little
-effort, by just adding your application-specific logic to a vnode module.
+effort by just handling your application-specific logic in a vnode module.
 
 ### 5. Testing
 
