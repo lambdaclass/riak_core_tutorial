@@ -15,7 +15,25 @@ for example commands. Alternatively,
 the [Tutorial](/#riak-core-tutorial) explains the step-by-step process to
 produce the same code base from scratch.
 
-## Usage
+* [Example application usage](#example-application-usage)
+* [Riak Core Tutorial](#riak-core-tutorial-1)
+  * [When to use Riak Core](#when-to-use-riak-core)
+  * [About this tutorial](#about-this-tutorial)
+  * [Useful links](#useful-links)
+  * [0. Riak Core overview](#0-riak-core-overview)
+  * [1. Setup](#1-setup)
+  * [2. The vnode](#2-the-vnode)
+    * [The riak_vnode behavior](#the-riak_vnode-behavior)
+    * [Application and supervisor setup](#application-and-supervisor-setup)
+    * [Sending commands to the vnode](#sending-commands-to-the-vnode)
+  * [3. Setting up the cluster](#3-setting-up-the-cluster)
+  * [4. Building a distributed Key/Value store](#4-building-a-distributed-keyvalue-store)
+  * [5. Testing](#5-testing)
+  * [6. Coverage commands](#6-coverage-commands)
+  * [7. Handoff](#7-handoff)
+  * [8. Redundancy and fault-tolerance](#8-redundancy-and-fault-tolerance)
+
+## Example application usage
 Run on three separate terminals:
 
 ``` shell
@@ -720,17 +738,17 @@ effort, by just adding your application-specific logic to a vnode module.
 
 TODO #7
 
-### 6. coverage commands
+### 6. Coverage commands
 
 keys, values
 explain the gotcha of breaking change in the coverage fsm
 
 add a test
 
-### 7. handoff
+### 7. Handoff
 
 explain what we've learned digging the code comments
 
-### 8. redundancy and fault tolerance
+### 8. Redundancy and fault-tolerance
 
 TODO #6
