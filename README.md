@@ -313,6 +313,7 @@ init([Partition]) ->
     {ok, #{partition => Partition}}.
 
 handle_command(ping, _Sender, State = #{partition := Partition}) ->
+  lager:info("Received ping command ~p", [Partition]),
   {reply, {pong, Partition}, State};
 
 handle_command(Message, _Sender, State) ->
@@ -508,23 +509,207 @@ let's run our `ping` function from the shell:
 
 ``` erlang
 (rc_example@127.0.0.1)1> rc_example:ping().
+10:19:00.903 [info] Received ping command 479555224749202520035584085735030365824602865664
 {pong,479555224749202520035584085735030365824602865664}
 (rc_example@127.0.0.1)2> rc_example:ping().
+10:19:01.503 [info] Received ping command 479555224749202520035584085735030365824602865664
 {pong,502391187832497878132516661246222288006726811648}
 ```
 
-### 3. setup the cluster, basic console commands
+### 3. Setting up the cluster
 
-add overlays and configuration for different nodes
+At this point we can execute a simple command, but none of the previous
+effort would make any sense if we keep running stuff on a single
+node. The whole point of riak_core is to distribute work in a
+fault-tolerant and decetralized manner. In this section we'll update
+our configuration so we can run our
+project in a three-node Erlang cluster. For practical reasons all of
+the nodes will reside on our local machine, but moving them to separate
+servers should fairly simple.
 
-explain what the makefile does, (no magic!)
+If you review our codebase you'll note that the one spot that
+has fixed node configuration is `conf/vm.args`, where we set the
+node name to `rc_example@127.0.0.1`. We want to have `rc_example1`,
+`rc_example2` and `rc_example3` instead. We'll be running our
+nodes in the same machine so we also need to use different ports for
+riak_core in each node (the `web_port` and `handoff_port` tuples in `conf/sys.config`).
 
-basic console/cluster status commands
-TODO #4
+Since we'll have an almost identical configuration in all of the nodes,
+we'll use the overalys feature that rebar3 inherits from relx. You can
+read about
+it [here](https://www.rebar3.org/docs/releases#section-overlays),
+although it's not strictly necessary for the
+purposes of this tutorial. First we tell rebar3 that `conf/sys.config`
+and `conf/vm.args` should be treated as templates by adding an
+`overlay` tuple in the `relx` configuration:
 
-### 4. in memory key value store
+``` erlang
+{overlay, [{template, "conf/sys.config", "releases/{{default_release_version}}/sys.config"},
+           {template, "conf/vm.args", "releases/{{default_release_version}}/vm.args"}]}
+```
 
-put, get, delete
+The template variables' values will be taken from `overlay_vars` files. We will
+define three
+different [rebar profiles](https://www.rebar3.org/docs/profiles) in
+`rebar.config`, each pointing to a different `overaly_vars` file:
+
+``` erlang
+{profiles, [{dev1, [{relx, [{overlay_vars, "conf/vars_dev1.config"}]}]},
+            {dev2, [{relx, [{overlay_vars, "conf/vars_dev2.config"}]}]},
+            {dev3, [{relx, [{overlay_vars, "conf/vars_dev3.config"}]}]}]}
+```
+
+ Now create
+`vars_dev1.config`, `vars_dev2.config` and `vars_dev3.config` in the
+`conf` directory as follows:
+
+``` erlang
+%% conf/vars_dev1.config
+{node, "rc_example1@127.0.0.1"}.
+
+{web_port,          8198}.
+{handoff_port,      8199}.
+
+%% conf/vars_dev2.config
+{node, "rc_example2@127.0.0.1"}.
+
+{web_port,          8298}.
+{handoff_port,      8299}.
+
+%% conf/vars_dev3.config
+{node, "rc_example3@127.0.0.1"}.
+
+{web_port,          8398}.
+{handoff_port,      8399}.
+```
+
+Lastly, update `sys.config` and `vm.args` to refer to template
+variables instead of concrete values:
+
+``` erlang
+%% conf/sys.config
+[{riak_core,
+  [{ring_state_dir, "./data/ring"},
+   {web_port, {{web_port}}},
+   {handoff_port, {{handoff_port}}},
+   {schema_dirs, ["lib/rc_example-0.1.0/priv"]}]}].
+
+%% conf/vm.args
+-name {{node}}
+```
+
+To run the release we need to tell rebar which profile to use, for
+example:
+
+``` shell
+rebar3 as dev1 release && _build/dev1/rel/rc_example/bin/rc_example
+```
+
+Let's add a Makefile to easily run any of the nodes:
+
+``` makefile
+.PHONY: dev1 dev2 dev3 clean_data
+
+dev1:
+	rebar3 as dev1 release && _build/dev1/rel/rc_example/bin/rc_example
+
+dev2:
+	rebar3 as dev2 release && _build/dev2/rel/rc_example/bin/rc_example
+
+dev3:
+	rebar3 as dev3 release && _build/dev3/rel/rc_example/bin/rc_example
+
+clean_data:
+	rm -rf _build/dev1/rel/rc_example/data* ; rm -rf _build/dev2/rel/rc_example/data* ; rm -rf _build/dev3/rel/rc_example/data*
+```
+
+We also include a `clean_data` target, for the cases when we want to start
+with a fresh cluster (riak_core persists cluster
+information between runs, so you may need to remove it when you make
+changes to your configuration).
+
+Before testing our cluster, let's add a function to inspect its status
+in `src/rc_example.erl`:
+
+``` erlang
+-export([ping/0,
+         ring_status/0]).
+
+ring_status() ->
+  {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+  riak_core_ring:pretty_print(Ring, [legend]).
+```
+
+Now open three terminals and run one of these commands on each:
+
+``` erlang
+$ make dev1
+$ make dev2
+$ make dev3
+```
+
+If you try the `ring_status` function, you'll see something like:
+
+```
+(rc_example1@127.0.0.1)1> rc_example:ring_status().
+==================================== Nodes ====================================
+Node a: 64 (100.0%) rc_example1@127.0.0.1
+==================================== Ring =====================================
+aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|aaaa|
+ok
+```
+
+Each node only knows about itself. We can fix that by making node 2 and
+3 join node 1. `riak_core:join` is used for a single node to join a
+cluster:
+
+``` erlang
+%% node 2
+(rc_example2@127.0.0.1)1> riak_core:join('rc_example1@127.0.0.1').
+18:46:45.409 [info] 'rc_example2@127.0.0.1' changed from 'joining' to 'valid'
+
+%% node 3
+(rc_example3@127.0.0.1)1> riak_core:join('rc_example1@127.0.0.1').
+18:46:47.120 [info] 'rc_example3@127.0.0.1' changed from 'joining' to 'valid'
+```
+
+Now `ring_status()` should show the three nodes with a third of the
+keyspace each (it may take some seconds for the percentages to settle):
+
+``` erlang
+(rc_example1@127.0.0.1)2> rc_example:ring_status().
+==================================== Nodes ====================================
+Node a: 21 ( 32.8%) rc_example1@127.0.0.1
+Node b: 22 ( 34.4%) rc_example2@127.0.0.1
+Node c: 21 ( 32.8%) rc_example3@127.0.0.1
+==================================== Ring =====================================
+abcc|abcc|abcc|abcc|abcc|abcc|abcc|abcc|abcc|abcc|abbc|abba|abba|abba|abba|abba|
+ok
+```
+
+If you call `rc_example:ping()` a couple of times, you should see that
+the log output (`received ping command`) is printed in a different
+terminal every time, because vnodes from any of the physical nodes can
+receive the command.
+
+### 4. Building a distributed Key/Value store
+
+Now that we have the project layout and and distribution setup we can
+start working on our in-memory Key/Value store. As you may imagine,
+this means modifying our worker vnode to support a new set of
+commands: `put`, `get` and `delete`. Here are the relevant parts:
+
+TODO
+
+* add state to vnode
+* add new handle_command clauses
+
+* add new functions to rc_example api
+* test the new functions in the shell
+
+As you can see, even if the initial setup can be a little burdensome,
+you can get distribution of work and fault-tolerance with little
+effort, by just adding your application-specific logic to a vnode module.
 
 ### 5. Testing
 
