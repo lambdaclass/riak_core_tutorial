@@ -115,24 +115,24 @@ scales and distributes the work in a decentralized manner, using
 [Consistent Hashing](https://en.wikipedia.org/wiki/Consistent_hashing).
 
 Most operations are applied to an object which is identified by some
-value. In the context of a Key/Value store, for example, the
+data value. In the context of a Key/Value store, for example, the
 identifier is the Key used in get, put and delete operations.
 
 Before performing the operation, a hashing function is applied to
-the key. The hashed value will be used to decide what node of the
-cluster should be responsible of executing the operation. The range of
-all possible values the hashed key can take (the keyspace, usually
+the key. The key hash will be used to decide which node in the
+cluster should be responsible for executing the operation. The range of
+possible values the key hash can take (the keyspace, usually
 depicted as a ring), is partitioned in equally sized buckets, which
-are called virtual nodes (vnodes).
+are assigned to virtual nodes, also known as vnodes.
 
 ![The Ring](ring.png)
 
-The amount of vnodes is fixed and a given hash value will always
-belong to the same partition (i.e. the same vnode). The vnodes, in
-turn, are evenly distributed across all available physycal
-nodes. Note this distribution isn't fixed as the keyspace partitioning
+The number of vnodes is fixed at cluster creation and a given hash value will
+always belong to the same partition (i.e. the same vnode). The vnodes in
+turn are evenly distributed across all available physical nodes.
+Note this distribution isn't fixed as the keyspace partitioning
 is: the vnode distribution can change if a physical node is added
-to the cluster or a one goes down.
+to the cluster or goes down.
 
 ### 1. Setup
 
@@ -164,12 +164,11 @@ riak_core dependency and lager, which we'll use for logging:
 
 ``` erlang
 {erl_opts, [debug_info, {parse_transform, lager_transform}]}.
-{deps, [{riak_core, "3.0.9", {pkg, riak_core_ng}},
-        {lager, "3.5.1"}]}.
+{deps, [{riak_core, "3.0.9", {pkg, riak_core_ng}}, {lager, "3.5.1"}]}.
 ```
 
 Note we're using
-the [riak_core_ng fork](https://hex.pm/packages/riak_core_ng), which is
+the [`riak_core_ng` fork](https://hex.pm/packages/riak_core_ng), which is
 more up to date so it's easier to make it work with Erlang 20. If you
 go ahead and try to `rebar3 compile` your project, you'll notice it
 fails with this message:
@@ -183,7 +182,7 @@ The issue here is that some of the dependencies of riak_core use
 the [warnings_as_errors option](http://erlang.org/doc/man/compile.html),
 and their code contains stuff
 that produces warnings in recent Erlang versions (namely, they use
-export_all or gen_fsm). To fix this we need to override their
+`export_all` or `gen_fsm`). To fix this we need to override their
 configuration in our rebar.config file, removing the `warnings_as_errors` option:
 
 ``` erlang
@@ -221,7 +220,7 @@ for its internal configuration:
 ```
 
 Then, add the [release configuration](https://www.rebar3.org/docs/releases) for
-development in rebar.config:
+development in `rebar.config`:
 
 ``` erlang
 {relx, [{release, {rc_example, "0.1.0"}, [rc_example]},
@@ -255,7 +254,7 @@ ring file: "no such file or directory"`. We need to add some configuration to
   ]}].
 ```
 
-`vm.args` just sets the node name; in `sys.confg` we set a data
+`vm.args` just sets the node name; in `sys.config` we set a data
 directory for riak core (`ring_state_dir`) and a
 couple of ports; we also need to point riak to its schema (by setting
 `schema_dirs`). For this to work we have to copy
@@ -276,7 +275,7 @@ simplest possible functionality: a ping command.
 
 Recall from the [overview](/#0-riak-core-overview), that the keyspace (the range of all possible
 results of hashing a key) is partitioned, and each partition is assigned to a
-virtual node. The vnode is a worker process, it
+virtual node. The vnode is a worker process which
 handles incoming requests known as commands and is implemented as
 an OTP behavior. In our initial example
 we'll create an empty vnode that only knows how to handle a ping
@@ -444,7 +443,7 @@ which will be hashed to decide what partition (that is what vnode at
 what physical node) should receive
 the request. In the case of `ping`, there isn't any actual object
 involved, and thus no key, but we make a random one by using
-`os:timestamp()`. The nature of the hashing algorithm makes it so it
+`os:timestamp()`. The nature of the hashing algorithm
 distributes values uniformly over the ring, so each new timestamp
 should be assigned to a random partition of the ring.
 
@@ -729,3 +728,9 @@ explain what we've learned digging the code comments
 ### 8. redundancy and fault tolerance
 
 TODO #6
+
+### 9. Other uses
+
+As you can see, riak_core provides the basic building blocks to build distributed services, consistent hashing, routing, support for sharding and replicating, distributed queries, etc. They need not all be used. For example, a game server which handles requests from players could partition players to handle load, and ensure that players requests are always handled on the same vnode to ensure data locality.
+
+A distributed batch job handling system could also use consistent hashing and routing to ensure jobs from the same batch are always handled by the same node, or distributed the jobs across several partitions and then use the distributed map-reduce queries to gather results.
