@@ -1191,14 +1191,20 @@ them
 #### Vnode implementation
 If you check our vnode implementation, you'll notice half of the
 callbacks deal with handoff. Let's go over their
-implementation, in the same order as they are called during this process.
+implementation, in the same order as they are called.
 
-TODO explain each step
-TODO make sure to cover everything mentioned in the code comments
+First, we need to include the `riak_core_vnode` header file, because
+we will refer to a macro defined there:
 
 ``` erlang
 -include_lib("riak_core/include/riak_core_vnode.hrl").
 ```
+
+`handoff_starting` is called on the sending vnode before the handoff
+begins. If the function returns true, the handoff will proceed through
+the normal path. If it returns false, the handoff will be
+cancelled. We don't need any special action here, so we just log and
+move forward:
 
 ``` erlang
 handoff_starting(_TargetNode, State) ->
@@ -1206,17 +1212,37 @@ handoff_starting(_TargetNode, State) ->
   {true, State}.
 ```
 
-``` erlang
-is_empty(State = #{data := Data}) ->
-  IsEmpty = maps:size(Data) == 0,
-  {IsEmpty, State}.
-```
+`handoff_cancelled` is called on the sending vnode in case the process
+is cancelled (usually explcitly by an admin tool). Again, we just log:
 
 ``` erlang
 handoff_cancelled(State) ->
   log("handoff cancelled", State),
   {ok, State}.
 ```
+
+`is_empty` should return a boolean informing if there's any data to
+migrate in the vnode; if there's not handoff is finished (calling `handoff_finished`).
+
+``` erlang
+is_empty(State = #{data := Data}) ->
+  IsEmpty = maps:size(Data) == 0,
+  {IsEmpty, State}.
+```
+
+The bulk of the work is done in the `handle_handoff_command`
+callback. This function can be a bit confusing, because it serves
+two different purposes depending on its calling arguments: to handle the
+request to fold over the vnode's data that needs to be transferred,
+and to handle regular vnode commands (e.g. `ping`, `put`, etc.) that arrive
+during handoff (and would otherwise be passed to `handle_command`).
+
+Let's focus on the first of those cases. riak_core knows what it needs
+to do with each piece of data the vnode holds (encode it, transfer it
+over the network to the new vnode and decode it there), but not what that data
+looks like or how it's stored (in our case Key/Value pairs on a map),
+so it gives us a function that encapsulates the processing and we need
+to apply it to our data:
 
 ``` erlang
 handle_handoff_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, _Sender,
@@ -1226,11 +1252,45 @@ handle_handoff_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, _Sender,
   {reply, Result, State};
 ```
 
-* when does handle_handoff_command gets called?
-* explain fold_req
-* explain what happens when command comes in during handoff (when
-  could this happen): forward or drop.
-* explain fold is synchronous, what would happen if it wasnt
+Nevermind the weird macro wrapper: `?FOLD_REQ` is just a record and we
+only care to extract the fold function (FoldFun) and the initial
+accumulator (Acc0). When a command with this shape arrives, we
+iterate over our vnodes' data, applying the given fold function. Note
+that the this function expects to be passed three arguments: key, value,
+and accumulator. This means that if your data structure doesn't
+already support this form of fold function you'll have to wrap it; in
+our case we just need to call `maps:fold/3` since our data is a
+map. The result of the fold is included in the `reply` tuple.
+
+FoldFun is synchronous and in our case the result
+of the command is replied right away, but there's also the option to
+return an `async` tuple; you can check
+[riak_kv](https://github.com/basho/riak_kv/blob/develop/src/riak_kv_vnode.erl#L1997-L2011) and
+[riak_search](https://github.com/basho/riak_search/blob/develop/src/riak_search_vnode.erl#L178-L194) implementations
+for reference. Note that if you go down this route, you may need to handle incoming commands that
+modify your vnodes' data while you are iterating over it.
+
+The second situation in which `handle_handoff_command` can be called
+is when a regular command arrives during handoff. If you check the
+[callback specification](https://github.com/Kyorai/riak_core/blob/3.0.9/src/riak_core_vnode.erl#L104-L110) you'll
+see that the result can be the same as in `handle_command`, with two
+additional return types: `forward` and `drop`. The forward reply will
+send the request to the target node, while the drop reply
+signifies that you won't even attempt to fulfill it. Which one to use
+depends on your application and the nature of the command.
+
+Let's reason about the possible situations in the case of our
+Key/Value store. When a `handle_handoff_command` arrives we can't tell
+if handoff has just started or is about to finish; we can't tell if
+the value associated with the command's key has been migrated to the
+receiving vnode already or the only copy is in this one. So the strategy we can
+take to stay consistent and avoid unnecessary effort is: when the
+command is a write (a `put` or a `delete`), we change our local copy
+of the code _and_ we forward it to the receiving vnode (that way, if it
+was already migrated, the change is applied in that copy too); if the
+command is read (a `get`), we reply with our local copy of the data
+(we know it's up to date because we applied all the writes
+locally). Let's see how this looks in the code:
 
 ``` erlang
 handle_handoff_command({get, Key}, Sender, State) ->
@@ -1242,7 +1302,27 @@ handle_handoff_command(Message, Sender, State) ->
   {forward, NewState}.
 ```
 
-* explain how we decide to handle those in our particular use case
+We added extra `handle_handoff_command` clauses for each of those
+cases. The first one handles `get`, a read operation; the
+implementation just calls `handle_command` since we
+want to reply with the local copy of the data, as usual.
+
+The second clause catches the rest of the commands, `put` and
+`delete`, which are write operations. In these cases we call
+`handle_command` as well, to modify our local copy of the data, but
+instead of using the result, we return `forward`, so the command is
+sent to the receiving vnode as well.
+
+That's it for `handle_handoff_command`. For a deeper understanding of
+the different  scenarios we suggest checking [this](https://github.com/Kyorai/riak_core/blob/faf04f4820aff5bc876f79609fa838e1c86c0fb0/src/riak_core_vnode.erl#L312-L339) and [this](https://github.com/basho/riak_kv/blob/d5cfe62d8f0ff36ead2019bde7a08cdd33fd3764/src/riak_kv_vnode.erl#L974-L984) comments, along with the
+relevant code.
+
+Moving on to the remaining callbacks. `encode_handoff_item` is called
+on the sending vnode, each time a Key/Value pair is about to be sent
+over the wire; we use `term_to_binary` to encode it. On the other end,
+`handle_handoff_data` will be called on the receiving vnode to decode
+the Key and Value; we use `binary_to_term` and update the data
+map with the new pair:
 
 ``` erlang
 encode_handoff_item(Key, Value) ->
@@ -1255,13 +1335,22 @@ handle_handoff_data(BinData, State = #{data := Data}) ->
   {reply, ok, State#{data => NewData}}.
 ```
 
+Finally, when handoff is done `handoff_finished` is called. After
+that, the sending vnode should be deleted; any necessary cleanup can
+be done in the `delete` callback. We don't do any special work in
+these two callbacks, just log and return:
+
 ``` erlang
 handoff_finished(_TargetNode, State) ->
   log("finished handoff", State),
   {ok, State}.
-```
 
+delete(State) ->
+  log("deleting the vnode", State),
+  {ok, State#{data => #{}}}.
+```
 #### Handoff test
+TODO
 
 * fill data, remove a node with data from the cluster, see that
   another node takes over the key
