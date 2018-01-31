@@ -36,8 +36,11 @@ produce the same code base from scratch.
             * [Coverage FSM Supervision](#coverage-fsm-supervision)
             * [Putting it all together](#putting-it-all-together)
             * [Coverage test](#coverage-test)
-         * [7. Handoff](#7-handoff)
-         * [8. Redundancy and fault-tolerance](#8-redundancy-and-fault-tolerance)
+         * [7. Redundancy and fault-tolerance](#7-redundancy-and-fault-tolerance)
+         * [8. Handoff](#8-handoff)
+            * [When does handoff occur?](#when-does-handoff-occur)
+            * [Vnode implementation](#vnode-implementation)
+            * [Handoff test](#handoff-test)
 
 ## Example application usage
 Run on three separate terminals:
@@ -135,8 +138,11 @@ series, which were our main references.
 * [A Gentle Introduction to Riak Core](http://efcasado.github.io/riak-core_intro/)
 * Understanding Riak Core:
   [Handoff](http://basho.com/posts/technical/understanding-riak_core-handoff/),
-  [The visit fun](http://basho.com/posts/technical/understanding-riak_core-visitfun/) and
   [Building Handoff](http://basho.com/posts/technical/understanding-riak_core-building-handoff/)
+  and
+  [The visit fun](http://basho.com/posts/technical/understanding-riak_core-visitfun/)
+* [udon_ng](https://github.com/mrallen1/udon_ng) example application.
+
 
 ### 0. Riak Core overview
 
@@ -1129,10 +1135,134 @@ coverage` output from every vnode when they receive the command.
 #### Coverage test
 TODO
 
-### 7. Handoff
-
-explain what we've learned digging the code comments
-
-### 8. Redundancy and fault-tolerance
+### 7. Redundancy and fault-tolerance
 
 TODO #6
+
+### 8. Handoff
+
+Part of the strength of the Dynamo architectures (and thus, of Riak Core) is
+how it enables scalability with small operational effort. Because
+the keyspace is designed as a ring of virtual nodes, adding or
+removing physical nodes to a cluster means changing the distribution
+of the vnodes across the physical nodes: a vnode will always handle
+the same segment of the keyspace (the same chunk of the key hashes),
+but where does that vnode resides physycally can change.
+
+For example: if we have a one-node cluster, it will necessarily
+contain the entire ring, that is all of the vnodes. If we start a second
+physical node and join that cluster, half of the vnodes will be "handed
+over" to the new physical node, so the keyspace is kept evenly
+distributed across the cluster.
+
+Riak Core provides the necessary infrastructure to decide where and
+when a vnode needs to be moved. We only need to fill in the
+specifics of how to iterate over our particualr vnodes' state, encode it in the
+giving end, and decode it in the receiving vnode. This process is
+called handoff. We'll go over all the required steps to support this scenario in our
+application. For a walkthrough of how handoff is implemented internally,
+check
+[the riak_core wiki](https://github.com/basho/riak_core/wiki/Handoffs).
+
+Note that if your vnodes are "stateless", for example if you just use
+riak_core as a mechanism to distribute work and don't need to keep
+internal state, you don't need to worry about handoff and can just
+leave the related callbacks empty.
+
+#### When does handoff occur?
+* An `ownership` handoff happens when a physical node joins or leaves
+the cluster. In this scenario, riak_core reassigns the physical nodes
+responsible for each vnode and it executes the handoff to move the
+vnode data from its old home to its new home.
+* `hinted` handoffs can occur if there's vnode redundancy (see
+  previous section). When the primary vnode for a particular part of
+  the ring is offline, riak_core still accepts operations on it and
+  routes those to a secondary vnode. When the primary vnode comes back
+  online, riak_core uses handoff to sync the current vnode state from
+  the secondary to the primary. Once the primary is synchronized,
+  operations are routed to it once again.
+
+There are also `repair` and `resize` related handoffs, which are a advanced
+topics that we won't cover. You can read about
+them
+[here](http://basho.com/posts/technical/understanding-riak_core-handoff/),
+[here](https://github.com/rzezeski/try-try-try/tree/master/2011/riak-core-conflict-resolution) and [here](https://github.com/basho/riak_core/commit/036e409eb83903315dd43a37c7a93c9256863807).
+
+#### Vnode implementation
+If you check our vnode implementation, you'll notice half of the
+callbacks deal with handoff. Let's go over their
+implementation, in the same order as they are called during this process.
+
+TODO explain each step
+TODO make sure to cover everything mentioned in the code comments
+
+``` erlang
+-include_lib("riak_core/include/riak_core_vnode.hrl").
+```
+
+``` erlang
+handoff_starting(_TargetNode, State) ->
+  log("starting handoff", State),
+  {true, State}.
+```
+
+``` erlang
+is_empty(State = #{data := Data}) ->
+  IsEmpty = maps:size(Data) == 0,
+  {IsEmpty, State}.
+```
+
+``` erlang
+handoff_cancelled(State) ->
+  log("handoff cancelled", State),
+  {ok, State}.
+```
+
+``` erlang
+handle_handoff_command(?FOLD_REQ{foldfun=FoldFun, acc0=Acc0}, _Sender,
+                       State = #{data := Data}) ->
+  log("Received fold request for handoff", State),
+  Result = maps:fold(FoldFun, Acc0, Data),
+  {reply, Result, State};
+```
+
+* when does handle_handoff_command gets called?
+* explain fold_req
+* explain what happens when command comes in during handoff (when
+  could this happen): forward or drop.
+* explain fold is synchronous, what would happen if it wasnt
+
+``` erlang
+handle_handoff_command({get, Key}, Sender, State) ->
+  log("GET during handoff, handling locally ~p", [Key], State),
+  handle_command({get, Key}, Sender, State);
+
+handle_handoff_command(Message, Sender, State) ->
+  {reply, _Result, NewState} = handle_command(Message, Sender, State),
+  {forward, NewState}.
+```
+
+* explain how we decide to handle those in our particular use case
+
+``` erlang
+encode_handoff_item(Key, Value) ->
+  erlang:term_to_binary({Key, Value}).
+
+handle_handoff_data(BinData, State = #{data := Data}) ->
+  {Key, Value} = erlang:binary_to_term(BinData),
+  log("received handoff data ~p", [{Key, Value}], State),
+  NewData = Data#{Key => Value},
+  {reply, ok, State#{data => NewData}}.
+```
+
+``` erlang
+handoff_finished(_TargetNode, State) ->
+  log("finished handoff", State),
+  {ok, State}.
+```
+
+#### Handoff test
+
+* fill data, remove a node with data from the cluster, see that
+  another node takes over the key
+* put the node back, see it recovers the key ownership
