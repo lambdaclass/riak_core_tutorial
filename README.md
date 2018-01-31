@@ -15,23 +15,29 @@ for example commands. Alternatively,
 the [Tutorial](/#riak-core-tutorial) explains the step-by-step process to
 produce the same code base from scratch.
 
-* [Example application usage](#example-application-usage)
-* [Riak Core Tutorial](#riak-core-tutorial-1)
-  * [When to use Riak Core](#when-to-use-riak-core)
-  * [About this tutorial](#about-this-tutorial)
-  * [Useful links](#useful-links)
-  * [0. Riak Core overview](#0-riak-core-overview)
-  * [1. Setup](#1-setup)
-  * [2. The vnode](#2-the-vnode)
-    * [The riak_vnode behavior](#the-riak_vnode-behavior)
-    * [Application and supervisor setup](#application-and-supervisor-setup)
-    * [Sending commands to the vnode](#sending-commands-to-the-vnode)
-  * [3. Setting up the cluster](#3-setting-up-the-cluster)
-  * [4. Building a distributed Key/Value store](#4-building-a-distributed-keyvalue-store)
-  * [5. Testing](#5-testing)
-  * [6. Coverage commands](#6-coverage-commands)
-  * [7. Handoff](#7-handoff)
-  * [8. Redundancy and fault-tolerance](#8-redundancy-and-fault-tolerance)
+   * [Riak Core Tutorial](#riak-core-tutorial)
+      * [Example application usage](#example-application-usage)
+      * [Riak Core Tutorial](#riak-core-tutorial-1)
+         * [When to use Riak Core](#when-to-use-riak-core)
+         * [About this tutorial](#about-this-tutorial)
+         * [Useful links](#useful-links)
+         * [0. Riak Core overview](#0-riak-core-overview)
+         * [1. Setup](#1-setup)
+         * [2. The vnode](#2-the-vnode)
+            * [The riak_vnode behavior](#the-riak_vnode-behavior)
+            * [Application and supervisor setup](#application-and-supervisor-setup)
+            * [Sending commands to the vnode](#sending-commands-to-the-vnode)
+         * [3. Setting up the cluster](#3-setting-up-the-cluster)
+         * [4. Building a distributed Key/Value store](#4-building-a-distributed-keyvalue-store)
+         * [5. Testing](#5-testing)
+         * [6. Coverage commands](#6-coverage-commands)
+            * [Handle coverage commands in the vnode](#handle-coverage-commands-in-the-vnode)
+            * [The coverage FSM](#the-coverage-fsm)
+            * [Coverage FSM Supervision](#coverage-fsm-supervision)
+            * [Putting it all together](#putting-it-all-together)
+            * [Coverage test](#coverage-test)
+         * [7. Handoff](#7-handoff)
+         * [8. Redundancy and fault-tolerance](#8-redundancy-and-fault-tolerance)
 
 ## Example application usage
 Run on three separate terminals:
@@ -336,11 +342,11 @@ init([Partition]) ->
     {ok, #{partition => Partition}}.
 
 handle_command(ping, _Sender, State = #{partition := Partition}) ->
-  lager:info("Received ping command ~p", [Partition]),
+  log("Received ping command ~p", [Partition], State),
   {reply, {pong, Partition}, State};
 
 handle_command(Message, _Sender, State) ->
-    lager:warning("unhandled_command ~p", [Message]),
+    log("unhandled_command ~p", [Message], State),
     {noreply, State}.
 
 ```
@@ -399,7 +405,22 @@ handle_exit(_Pid, _Reason, State) ->
 
 terminate(_Reason, _State) ->
     ok.
+
+%% internal
+
+%% same as lager:info but prepends the partition
+log(String, State) ->
+  log(String, [], State).
+
+log(String, Args, #{partition := Partition}) ->
+  String2 = "[~.36B] " ++ String,
+  Args2 = [Partition | Args],
+  lager:info(String2, Args2),
+  ok.
 ```
+
+We also added a small `log` helper that prepends the partition to all
+the vnode logs.
 
 #### Application and supervisor setup
 Before moving on we need to add some boilerplate code for riak_core to
@@ -727,16 +748,16 @@ init([Partition]) ->
   {ok, #{partition => Partition, data => #{}}}.
 
 handle_command({put, Key, Value}, _Sender, State = #{data := Data}) ->
-  lager:info("PUT ~p:~p", [Key, Value]),
+  log("PUT ~p:~p", [Key, Value], State),
   NewData = Data#{Key => Value},
   {reply, ok, State#{data => NewData}};
 
 handle_command({get, Key}, _Sender, State = #{data := Data}) ->
-  lager:info("GET ~p", [Key]),
+  log("GET ~p", [Key], State),
   {reply, maps:get(Key, Data, not_found), State};
 
 handle_command({delete, Key}, _Sender, State = #{data := Data}) ->
-  lager:info("DELETE ~p", [Key]),
+  log("DELETE ~p", [Key], State),
   NewData = maps:remove(Key, Data),
   {reply, maps:get(Key, Data, not_found), State#{data => NewData}};
 ```
@@ -848,20 +869,20 @@ In this section we're going to implement two new commands: `keys` and
 `values`, which as you may guess return the list of keys and values
 currently present in the datastore.
 
-#### handle coverage on the vnode
+#### Handle coverage commands in the vnode
 
 The vnode is the easy part. Each vnode just needs to return the list
 of Keys or Values it contains in the `data` field of its state. This
-is done in the `handle_coverage` command:
+is done in the `handle_coverage` callback:
 
 ``` erlang
 handle_coverage(keys, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
-  lager:info("Received keys coverage"),
+  log("Received keys coverage", State),
   Keys = maps:keys(Data),
   {reply, {ReqId, Keys}, State};
 
 handle_coverage(values, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
-  lager:info("Received values coverage"),
+  log("Received values coverage", State),
   Values = maps:values(Data),
   {reply, {ReqId, Values}, State}.
 ```
@@ -870,9 +891,8 @@ handle_coverage(values, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
 We need to introduce a new component, the one that will be in charge
 of managing the coverage command, that is of starting it and gathering
 the results sent from each of the vnodes. riak_core provides the
-`riak_core_coverage_fsm` behavior for this purpose.
-
-Let's create a `src/rc_example_coverage_fsm.erl` module implementing
+`riak_core_coverage_fsm` behavior for this purpose (a finite state
+machine). Let's create a `src/rc_example_coverage_fsm.erl` module implementing
 that behavior and go over each of its functions:
 
 ``` erlang
@@ -891,7 +911,7 @@ start_link(ReqId, ClientPid, Request, Timeout) ->
 ```
 
 So far, nothing very special: the start_link will be called by a
-supervisore (see next section) to start the process, and the
+supervisor to start the process (see next section) and the
 parameters are more or less forwarded to
 `riak_core_coverage_fsm:start_link`.
 
@@ -904,38 +924,33 @@ init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
             request => Request,
             accum => []},
 
-  {Request, allup, 1, 1, rc_example, %% service to use to check for available nodes
-   rc_example_vnode_master, %% The atom to use to reach the vnode master module
-   Timeout,
-   %% coverage plan was added in the _ng fork
-   %% https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f
-   riak_core_coverage_plan, %%  The module which defines create_plan
-   State}.
+  {Request, allup, 1, 1, rc_example, rc_example_vnode_master, Timeout,
+   riak_core_coverage_plan, State}.
 ```
 
 In `init`, we initialize the process state as usual. We create a state
 map where we put request metadata, the client process id (so we can
-later reply with the result of the command) and an accumulator list
+later reply to it with the result of the command) and an accumulator list
 that we will update with the results coming from each vnode.
 
 `init` returns a big tuple with a bunch of parameters that control how
-the coverage command should work. Let's briefly explain what each of
-them is (mostly taken from
+the coverage command should work. Let's briefly explain each of
+them (mostly taken from
 [here](https://github.com/Kyorai/riak_core/blob/3.0.9/src/riak_core_coverage_fsm.erl#L45-L63);
 you'll have to dig around for more details):
 
 * Request: an opaque data structure representing the command to be
-  handled by the vnodes. In our case it will just be either of the `keys` or
+  handled by the vnodes. In our case it will be either of the `keys` or
   `values` atoms.
 * VNodeSelector: an atom that specifies whether we want to run the
-  command in all vnodes (`all`) or only those reachable (`allup`).
+  command in all vnodes (`all`) or only in those reachable (`allup`).
 * ReplicationFactor: used to accurately create a minimal covering set
   of vnodes.
 * PrimaryVNodeCoverage: The number of primary VNodes from the
   preference list to use in creating the coverage plan. Typically just
   1.
-* NodeCheckService: the service to use to check for available
-  nodes. AFAIK this is the same as the atom passed to the node_watcher
+* NodeCheckService: the service used to check for available
+  nodes. This is the same as the atom passed to the node_watcher
   at application startup.
 * VNodeMaster: The atom to use to reach the vnode master module (`rc_example_vnode_master`).
 * Timeout: timeout of the coverage request.
@@ -944,21 +959,174 @@ you'll have to dig around for more details):
   command. This will usually be `riak_core_coverage_plan`.
 * State: the initial state for the module.
 
-Note that the PlannerMode argument was [introduced in the `riak_core_ng`
+Note that the PlannerMod argument was [introduced in the `riak_core_ng`
 fork](https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f) and
 isn't present in the original basho codebase (thus, if you
 are using an older riak_core version you should omit that parameter).
 
-#### supervision
-* add new supervisor, add to global supervisor
-* explain run/start_fsm api
+``` erlang
+process_results({{_ReqId, {_Partition, _Node}}, []}, State ) ->
+  {done, State};
+
+process_results({{_ReqId, {Partition, Node}}, Data},
+                State = #{accum := Accum}) ->
+  NewAccum = [{Partition, Node, Data} | Accum],
+  {done, State#{accum => NewAccum}}.
+```
+
+The `process_results` callback gets called when the coverage module
+receives a set of results from a vnode. For our `keys` and `values`
+commands we store the partition
+and node identifiers along with the data, so we can see where each
+piece came from in the final result. Since in our
+tests most of the vnodes will be empty, we filter them out
+by handling the empty list case in a separate `process_results` clause
+that leaves the accumulator unchanged.
+
+``` erlang
+finish(clean, State = #{req_id := ReqId, from := From, accum := Accum}) ->
+  lager:info("Finished coverage request ~p", [ReqId]),
+
+  %% send the result back to the caller
+  From ! {ReqId, {ok, Accum}},
+  {stop, normal, State};
+
+finish({error, Reason}, State = #{req_id := ReqId, from := From, accum := Accum}) ->
+  lager:warning("Coverage query failed! Reason: ~p", [Reason]),
+  From ! {ReqId, {partial, Reason, Accum}},
+  {stop, normal, State}.
+```
+
+Finally, the `finish` function will be called when the coverage
+command is done. If it goes well, the first argument will be `clean`;
+in that case we reply the accumulated data to the caller Pid (stored
+in `from`). If there's an error we handle it in the second `finish` clause.
+
+#### Coverage FSM Supervision
+
+We need to supervise our `rc_example_coverage_fsm` processes. Since
+these are created on demand, one per each command that needs
+to be executed, we are going to use the `simple_one_for_one`
+[supervisor strategy](http://erlang.org/doc/man/supervisor.html). Create a
+`src/rc_example_coverage_fsm_sup.erl` module:
+
+``` erlang
+-module(rc_example_coverage_fsm_sup).
+
+-behavior(supervisor).
+
+-export([start_link/0,
+         start_fsm/1,
+         init/1]).
+
+start_link() ->
+  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+init([]) ->
+  CoverageFSM = {undefined,
+                 {rc_example_coverage_fsm, start_link, []},
+                 temporary, 5000, worker, [rc_example_coverage_fsm]},
+
+  {ok, {{simple_one_for_one, 10, 10}, [CoverageFSM]}}.
+
+start_fsm(Args) ->
+  supervisor:start_child(?MODULE, Args).
+```
+
+When a coverage command needs to be executed, `start_fsm` is
+called to create a new child of this supervisor.
+
+We also need to add `rc_example_coverage_fsm_sup` to the main
+application supervisor in `src/rc_example_sup.erl`:
+
+``` erlang
+init([]) ->
+  VMaster = {rc_example_vnode_master,
+             {riak_core_vnode_master, start_link, [rc_example_vnode]},
+             permanent, 5000, worker, [riak_core_vnode_master]},
+
+  CoverageFSM = {rc_example_coverage_fsm_sup,
+                 {rc_example_coverage_fsm_sup, start_link, []},
+                 permanent, infinity, supervisor, [rc_example_coverage_fsm_sup]},
+
+  {ok, {{one_for_one, 5, 10}, [VMaster, CoverageFSM]}}.
+```
 
 #### Putting it all together
 
-* add keys, values and coverage helper
-* run in shell
+Now that we have all the components in place, let's add the `keys` and
+`values` functions to `src/rc_example.erl`:
 
-#### testing
+``` erlang
+keys() ->
+  coverage_command(keys).
+
+values() ->
+  coverage_command(values).
+
+%% internal
+
+coverage_command(Command) ->
+  Timeout = 5000,
+  ReqId = erlang:phash2(erlang:monotonic_time()),
+  {ok, _} = rc_example_coverage_fsm_sup:start_fsm([ReqId, self(), Command, Timeout]),
+
+  receive
+    {ReqId, Val} -> Val
+  end.
+```
+
+We create a ReqId to identify the request and call
+`rc_example_coverage_fsm_sup:start_fsm` to create a new child for the
+supervisor, passing all the parameters the `rc_example_coverage_fsm`
+needs to execute the command. Finally, we receive the result value,
+identified by the ReqId.
+
+Restart your releases, fill the store with some values and try the new
+commands:
+
+``` erlang
+(rc_example1@127.0.0.1)1> rc_example:put(k1, v1).
+ok
+(rc_example1@127.0.0.1)2> rc_example:put(k100, v100).
+12:17:25.001 [info] [RKFE4TBE76PR5N05XGK31C8TPLJGJY8] PUT k100:v100
+ok
+(rc_example1@127.0.0.1)3> rc_example:put(k101, v101).
+ok
+(rc_example1@127.0.0.1)4> rc_example:put(k444, v444).
+ok
+(rc_example1@127.0.0.1)5> rc_example:put(k4445, v4445).
+ok
+(rc_example1@127.0.0.1)6> rc_example:keys().
+12:17:45.916 [info] Starting coverage request 63138856 keys
+12:17:45.921 [info] [RKFE4TBE76PR5N05XGK31C8TPLJGJY8] Received keys coverage
+12:17:45.921 [info] [TFPL6YYQR76578P6XWBOLKEAZ9KS1S0] Received keys coverage
+12:17:45.921 [info] [0] Received keys coverage
+12:17:45.921 [info] [S18XWCQ8C6TUO1FF6KHZFEA710JSFEO] Received keys coverage
+12:17:45.921 [info] [IOTYLKHHK4JWG0YA4DNZM9ISOOD6Y9S] Received keys coverage
+(...)
+{ok,[{707914855582156101004909840846949587645842325504,
+      'rc_example3@127.0.0.1',
+      [k101]},
+     {1141798154164767904846628775559596109106197299200,
+      'rc_example2@127.0.0.1',
+      [k1]},
+     {890602560248518965780370444936484965102833893376,
+      'rc_example3@127.0.0.1',
+      [k444]},
+     {981946412581700398168100746981252653831329677312,
+      'rc_example3@127.0.0.1',
+      [k4445]},
+     {1347321821914426127719021955160323408745312813056,
+      'rc_example1@127.0.0.1',
+      [k100]}]}
+```
+
+As expected, the result contains all the inserted keys and what vnode
+and physical node they come from. We also see the `received keys
+coverage` output from every vnode when they receive the command.
+
+#### Coverage test
 TODO
 
 ### 7. Handoff

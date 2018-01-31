@@ -129,7 +129,7 @@ log(String, State) ->
 
 %% same as lager:info but prepends the partition
 log(String, Args, #{partition := Partition}) ->
-  String2 = "[~p] " ++ String,
+  String2 = "[~.36B] " ++ String,
   Args2 = [Partition | Args],
   lager:info(String2, Args2),
   ok.

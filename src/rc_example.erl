@@ -50,9 +50,9 @@ sync_command(Key, Command) ->
 
 coverage_command(Command) ->
   Timeout = 5000,
-  {ok, Results} = rc_example_coverage_fsm:run(Command, Timeout),
+  ReqId = erlang:phash2(erlang:monotonic_time()),
+  {ok, _} = rc_example_coverage_fsm_sup:start_fsm([ReqId, self(), Command, Timeout]),
 
-  %% drop empty vnode results
-  lists:filter(fun({_Partition, _Node, []}) -> false;
-                  (_Result) -> true
-               end, Results).
+  receive
+    {ReqId, Val} -> Val
+  end.

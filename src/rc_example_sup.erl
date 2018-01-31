@@ -2,16 +2,11 @@
 
 -behaviour(supervisor).
 
-%% API
--export([start_link/0]).
-
-%% Supervisor callbacks
--export([init/1]).
-
--define(SERVER, ?MODULE).
+-export([start_link/0,
+         init/1]).
 
 start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
   VMaster = {rc_example_vnode_master,
@@ -22,6 +17,4 @@ init([]) ->
                  {rc_example_coverage_fsm_sup, start_link, []},
                  permanent, infinity, supervisor, [rc_example_coverage_fsm_sup]},
 
-  {ok,
-   {{one_for_one, 5, 10},
-    [VMaster, CoverageFSM]}}.
+  {ok, {{one_for_one, 5, 10}, [VMaster, CoverageFSM]}}.

@@ -2,18 +2,10 @@
 
 -behaviour(riak_core_coverage_fsm).
 
--export([run/2,
-         start_link/4,
+-export([start_link/4,
          init/2,
          process_results/2,
          finish/2]).
-
-run(Request, Timeout) ->
-  ReqId = erlang:phash2(erlang:monotonic_time()),
-  {ok, _} = rc_example_coverage_fsm_sup:start_fsm([ReqId, self(), Request, Timeout]),
-  receive
-    {ReqId, Val} -> Val
-  end.
 
 start_link(ReqId, ClientPid, Request, Timeout) ->
   riak_core_coverage_fsm:start_link(?MODULE, {pid, ReqId, ClientPid}, [Request, Timeout]).
@@ -41,6 +33,9 @@ init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
    %% https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f
    riak_core_coverage_plan, %%  The module which defines create_plan
    State}.
+
+process_results({{_ReqId, {_Partition, _Node}}, []}, State ) ->
+  {done, State};
 
 process_results({{_ReqId, {Partition, Node}}, Data},
                 State = #{accum := Accum}) ->
