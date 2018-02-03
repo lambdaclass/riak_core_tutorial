@@ -700,7 +700,7 @@ $ make dev3
 
 If you try the `ring_status` function, you'll see something like:
 
-```
+```erlang
 (rc_example1@127.0.0.1)1> rc_example:ring_status().
 ==================================== Nodes ====================================
 Node a: 64 (100.0%) rc_example1@127.0.0.1
@@ -1137,7 +1137,31 @@ TODO
 
 ### 7. Redundancy and fault-tolerance
 
-TODO #6
+TODO turn these notes into proper text:
+
+- if we're storing data in our vnodes (as we do in our example), we
+  need to account for the fact that physical nodes can go down, and
+  with them the vnodes they contain. Therefore we need to replicate
+  our data to multiple vnodes so a secondary one can take over when
+  the primary is not available
+- this is introduces room for a lot of decisions and tradeoffs to
+  consider (to how many vnodes do I send the data, how many successful
+  responses do I need to consider the operation successful, who many
+  values do I consider when reading data, how to handle conflicts
+  between copies, etc.),
+  which are more related to database design and configuration than to
+  riak_core itself. riak_core is about distribution more than
+  databases, so we won't get into the specifics here. You can review
+  the little riak core book and the elixir series, which cover the
+  topic.
+  https://marianoguerra.github.io/little-riak-core-book/tolerating-node-failures.html#quorum-based-writes-and-deletes
+https://medium.com/@GPad/create-a-riak-core-application-in-elixir-part-5-86cd9d2c6b92
+
+Let's just mention the couple of spots in the riak_core api where we
+can introduce redundancy:
+- get multiple apls with `:riak_core_apl.get_apl` instead of
+  get_primary_apl
+- pass the pref list to `:riak_core_vnode_master.command`
 
 ### 8. Handoff
 
