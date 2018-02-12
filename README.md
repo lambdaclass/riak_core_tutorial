@@ -475,7 +475,7 @@ public interface to our application:
 ping()->
   Key = os:timestamp(),
   DocIdx = hash_key(Key),
-  PrefList = riak_core_apl:get_primary_apl(DocIdx, 1, rc_example),
+  PrefList = riak_core_apl:get_apl(DocIdx, 1, rc_example),
   [{IndexNode, _Type}] = PrefList,
   Command = ping,
   riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).
@@ -504,7 +504,7 @@ the first element is called the bucket, a value
 riak_core will use to namespace your keys; you can choose to have a
 single one per application, or many, according to your needs.
 
-The result of the hash is passed to `riak_core_apl:get_primary_apl`
+The result of the hash is passed to `riak_core_apl:get_apl`
 which returns an Active Preference List (APL) for the given key, this
 is a list of active vnodes that can handle that request. The amount of
 offered vnodes will be determined by the second argument of the
@@ -518,18 +518,18 @@ better sense of how they work:
 (rc_example@127.0.0.1)2> K1 = riak_core_util:chash_key({<<"rc_example">>, term_to_binary(os:timestamp())}).
 <<190,175,151,200,144,123,229,205,94,16,209,140,252,108,
   247,20,238,31,6,82>>
-(rc_example1@127.0.0.1)3> riak_core_apl:get_primary_apl(K1, 1, rc_example).
+(rc_example1@127.0.0.1)3> riak_core_apl:get_apl(K1, 1, rc_example).
 [{{1096126227998177188652763624537212264741949407232,
    'rc_example@127.0.0.1'},
   primary}]
 (rc_example1@127.0.0.1)4> K2 = riak_core_util:chash_key({<<"rc_example">>, term_to_binary(os:timestamp())}).
 <<113,53,13,80,4,131,62,95,63,164,211,74,145,83,189,77,
   254,224,190,198>>
-(rc_example@127.0.0.1)5> riak_core_apl:get_primary_apl(K2, 1, rc_example).
+(rc_example@127.0.0.1)5> riak_core_apl:get_apl(K2, 1, rc_example).
 [{{662242929415565384811044689824565743281594433536,
    'rc_example@127.0.0.1'},
   primary}]
-(rc_example@127.0.0.1)6> riak_core_apl:get_primary_apl(K2, 3, rc_example).
+(rc_example@127.0.0.1)6> riak_core_apl:get_apl(K2, 3, rc_example).
 [{{662242929415565384811044689824565743281594433536,
    'rc_example@127.0.0.1'},
   primary},
@@ -808,7 +808,7 @@ hash_key(Key) ->
 
 sync_command(Key, Command) ->
   DocIdx = hash_key(Key),
-  PrefList = riak_core_apl:get_primary_apl(DocIdx, 1, rc_example),
+  PrefList = riak_core_apl:get_apl(DocIdx, 1, rc_example),
   [{IndexNode, _Type}] = PrefList,
   riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).
 ```
@@ -1137,31 +1137,82 @@ TODO
 
 ### 7. Redundancy and fault-tolerance
 
-TODO turn these notes into proper text:
+In the non-ideal world of distributed systems we need to account for
+the fact that software and hardware can fail and that networks are
+unreliable. In other words, we need to build our distributed system such that it
+keeps functioning when one or more of the nodes becomes
+unavailable. riak_core provides some useful building blocks to achieve
+it: it will monitor the cluster, redistribute partitions when
+nodes go down and even expose a mechanism to move data
+around when they come back online (see [handoff](#8-handoff)). But
+some of the work will be implementation specific.
 
-- if we're storing data in our vnodes (as we do in our example), we
-  need to account for the fact that physical nodes can go down, and
-  with them the vnodes they contain. Therefore we need to replicate
-  our data to multiple vnodes so a secondary one can take over when
-  the primary is not available
-- this is introduces room for a lot of decisions and tradeoffs to
-  consider (to how many vnodes do I send the data, how many successful
-  responses do I need to consider the operation successful, who many
-  values do I consider when reading data, how to handle conflicts
-  between copies, etc.),
-  which are more related to database design and configuration than to
-  riak_core itself. riak_core is about distribution more than
-  databases, so we won't get into the specifics here. You can review
-  the little riak core book and the elixir series, which cover the
-  topic.
-  https://marianoguerra.github.io/little-riak-core-book/tolerating-node-failures.html#quorum-based-writes-and-deletes
-https://medium.com/@GPad/create-a-riak-core-application-in-elixir-part-5-86cd9d2c6b92
+If your system works as a distributed database, that is if your
+vnodes hold state that should survive node outages, then you'll have
+to replicate each piece of data to multiple vnodes, so a fallback vnode
+can take over when the primary is not available. In our Key/Value
+store example, this means that `put` commands should
+be sent to multiple vnodes to replicate the data, and `delete` commands
+should be sent to all the replicas. This is introduces room for a lot
+of design decisions, each with their own tradeoffs:
+* How many physical nodes should a cluster consist of?
+* How many replicas of each key should be stored?
+* How many successful responses are required for a write operation to succeed?
+* How many to read data?
+* How to handle write conflicts between replicas?
+* etc.
 
-Let's just mention the couple of spots in the riak_core api where we
-can introduce redundancy:
-- get multiple apls with `:riak_core_apl.get_apl` instead of
-  get_primary_apl
-- pass the pref list to `:riak_core_vnode_master.command`
+
+These are more related to database design and tuning than to
+riak_core itself; riak_core is about distribution mechanics, so we
+won't go too fair into the specifics here. For the sake of
+completeness, let's briefly mention how the riak_core
+API allows us to introduce redundancy. If you review the
+`src/rc_example.erl` module, you'll recal that we use
+`:riak_core_apl.get_apl` to obtain a list of vnodes that can handle a
+given command; let's say we want to replicate our data to three nodes,
+then we can request for that amount:
+
+``` erlang
+(rc_example1@127.0.0.1)2> K = riak_core_util:chash_key({<<"rc_example">>, term_to_binary(os:timestamp())}).
+(rc_example1@127.0.0.1)3> riak_core_apl:get_apl(K, 3, rc_example).
+[{1073290264914881830555831049026020342559825461248,
+  'rc_example1@127.0.0.1'},
+ {1096126227998177188652763624537212264741949407232,
+  'rc_example1@127.0.0.1'},
+ {1118962191081472546749696200048404186924073353216,
+  'rc_example2@127.0.0.1'}]
+```
+
+Then to actually send a command, instead of using
+`riak_core_vnode_master:sync_spawn_command`, we turn to the more
+generic `riak_core_vnode_master:command` which takes a Preference List
+instead of a single target vnode:
+
+``` erlang
+replicated_command(Key, Command) ->
+  DocIdx = hash_key(Key),
+  PrefList = riak_core_apl:get_apl(DocIdx, 3, rc_example),
+
+  ReqId = erlang:phash2(erlang:monotonic_time()),
+  Sender = {raw, ReqId, self()},
+  riak_core_vnode_master:command(PrefList, Command, Sender, rc_example_vnode_master),
+  receive
+    {ReqId, Reply} -> Reply
+  end.
+```
+
+Note we need to create a request id and pass the current process in
+the `Sender` argument so riak_core knows where to send the reply to.
+In this case, for demonstration purposes, we just do a blocking
+`receive` and return the first message that arrives; a more serious
+implementation could use a gen_server or a fsm to gather the responses
+and achieve some sort of quorum. If you are interested in the
+  topic, you can review the
+  [Little Riiak Core book](https://marianoguerra.github.io/little-riak-core-book/tolerating-node-failures.html#quorum-based-writes-and-deletes) and
+  the
+  [Elixir series](https://medium.com/@GPad/create-a-riak-core-application-in-elixir-part-5-86cd9d2c6b92),
+  both of which implement solutions to this problem.
 
 ### 8. Handoff
 
