@@ -68,6 +68,7 @@ key_value_test(Config) ->
   v3 = rc_command(Node3, get, [k3]),
   not_found = rc_command(Node3, get, [k10]),
 
+  %% test reset and delete
   ok = rc_command(Node1, put, [k1, v_new]),
   v_new = rc_command(Node1, get, [k1]),
 
@@ -79,10 +80,43 @@ key_value_test(Config) ->
 
   ok.
 
-coverage_test(_Config) ->
-  %% set a range of keys
-  %% get all keys, ensure all present
-  %% get all values, ensure all present
+coverage_test(Config) ->
+  Node1 = ?config(node1, Config),
+  Node2 = ?config(node2, Config),
+
+  %% clear, should contain no keys and no
+  {ok, []} = rc_command(Node1, clear),
+  {ok, []} = rc_command(Node1, keys),
+  {ok, []} = rc_command(Node1, values),
+
+  ToKey = fun (N) -> "key" ++ integer_to_list(N) end,
+  ToValue = fun (N) -> "value" ++ integer_to_list(N) end,
+  Range = lists:seq(1, 100),
+  lists:foreach(fun(N) ->
+                    ok = rc_command(Node1, put, [ToKey(N), ToValue(N)])
+                end, Range),
+
+  %% convert the coverage result to a plain list
+  CleanList = fun({ok, List}) ->
+                  lists:foldl(fun({_Partition, _Node, Values}, Accum) ->
+                                  lists:append(Accum, Values)
+                              end, [], List)
+              end,
+
+  SameElements = fun (L1, L2) ->
+                  S1 = sets:from_list(L1),
+                  S2 = sets:from_list(L2),
+                  sets:is_subset(S1, S2) andalso sets:is_subset(S2, S1)
+              end,
+
+  ActualKeys = CleanList(rc_command(Node2, keys)),
+  ActualValues = CleanList(rc_command(Node2, values)),
+
+  100 = length(ActualKeys),
+  100 = length(ActualValues),
+
+  true = SameElements(ActualKeys, lists:map(ToKey, Range)),
+  true = SameElements(ActualValues, lists:map(ToValue, Range)),
 
   ok.
 
@@ -103,13 +137,6 @@ start_node(NodeName, WebPort, HandoffPort) ->
   rpc:call(NodeName, application, set_env, [riak_core, web_port, WebPort]),
   rpc:call(NodeName, application, set_env, [riak_core, handoff_port, HandoffPort]),
   rpc:call(NodeName, application, set_env, [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
-
-  %% TODO try this syntax
-  %% Environment = [{ring_state_dir, "./data/ring"},
-  %%                {web_port, WebPort},
-  %%                {handoff_port, HandoffPort},
-  %%                {schema_dirs, ["../../lib/rc_example/priv"]}],
-  %% rpc:call(NodeName, application, load, [{application, riak_core, [{env, Environment}]}]),
 
   %% start the rc_example app
   {ok, _} = rpc:call(NodeName, application, ensure_all_started, [rc_example]),
