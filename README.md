@@ -1,4 +1,5 @@
 # Riak Core Tutorial
+[![Build Status](https://travis-ci.org/lambdaclass/riak_core_tutorial.svg?branch=master)](https://travis-ci.org/lambdaclass/riak_core_tutorial)
 
 A basic example of a riak_core application, using the most
 recent version of the [riak_core_ng fork](https://hex.pm/packages/riak_core_ng)
