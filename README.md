@@ -54,15 +54,19 @@ make dev3
 Join the nodes and ping:
 
 ``` erlang
-(rc_example1@127.0.0.1)1> riak_core:join('rc_example2@127.0.0.1').
-(rc_example1@127.0.0.1)2> riak_core:join('rc_example3@127.0.0.1').
-(rc_example1@127.0.0.1)3> rc_example:ping().
+(rc_example2@127.0.0.1)1> riak_core:join('rc_example1@127.0.0.1').
+(rc_example2@127.0.0.1)2> rc_example:ping().
+```
+
+``` erlang
+(rc_example3@127.0.0.1)1> riak_core:join('rc_example1@127.0.0.1').
+(rc_example3@127.0.0.1)2> rc_example:ping().
 ```
 
 Check the ring status:
 
 ``` erlang
-(rc_example3@127.0.0.1)4> rc_example:ring_status().
+(rc_example3@127.0.0.1)3> rc_example:ring_status().
 ```
 
 Try the key/value commands:
@@ -476,7 +480,7 @@ ping()->
   Key = os:timestamp(),
   DocIdx = hash_key(Key),
   PrefList = riak_core_apl:get_apl(DocIdx, 1, rc_example),
-  [{IndexNode, _Type}] = PrefList,
+  [IndexNode] = PrefList,
   Command = ping,
   riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).
 
@@ -519,26 +523,21 @@ better sense of how they work:
 <<190,175,151,200,144,123,229,205,94,16,209,140,252,108,
   247,20,238,31,6,82>>
 (rc_example1@127.0.0.1)3> riak_core_apl:get_apl(K1, 1, rc_example).
-[{{1096126227998177188652763624537212264741949407232,
-   'rc_example@127.0.0.1'},
-  primary}]
+[{1096126227998177188652763624537212264741949407232,
+  'rc_example@127.0.0.1'}]
 (rc_example1@127.0.0.1)4> K2 = riak_core_util:chash_key({<<"rc_example">>, term_to_binary(os:timestamp())}).
 <<113,53,13,80,4,131,62,95,63,164,211,74,145,83,189,77,
   254,224,190,198>>
 (rc_example@127.0.0.1)5> riak_core_apl:get_apl(K2, 1, rc_example).
-[{{662242929415565384811044689824565743281594433536,
-   'rc_example@127.0.0.1'},
-  primary}]
+[{662242929415565384811044689824565743281594433536,
+  'rc_example@127.0.0.1'}]
 (rc_example@127.0.0.1)6> riak_core_apl:get_apl(K2, 3, rc_example).
-[{{662242929415565384811044689824565743281594433536,
-   'rc_example@127.0.0.1'},
-  primary},
- {{685078892498860742907977265335757665463718379520,
-   'rc_example@127.0.0.1'},
-  primary},
- {{707914855582156101004909840846949587645842325504,
-   'rc_example@127.0.0.1'},
-  primary}]
+[{662242929415565384811044689824565743281594433536,
+  'rc_example@127.0.0.1'},
+ {685078892498860742907977265335757665463718379520,
+  'rc_example@127.0.0.1'},
+ {707914855582156101004909840846949587645842325504,
+  'rc_example@127.0.0.1'}]
 ```
 
 We get different partitions every time, always on the same physical
@@ -809,7 +808,7 @@ hash_key(Key) ->
 sync_command(Key, Command) ->
   DocIdx = hash_key(Key),
   PrefList = riak_core_apl:get_apl(DocIdx, 1, rc_example),
-  [{IndexNode, _Type}] = PrefList,
+  [IndexNode] = PrefList,
   riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).
 ```
 

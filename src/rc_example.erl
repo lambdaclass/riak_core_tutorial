@@ -45,7 +45,7 @@ hash_key(Key) ->
 sync_command(Key, Command) ->
   DocIdx = hash_key(Key),
   PrefList = riak_core_apl:get_apl(DocIdx, 1, rc_example),
-  [{IndexNode, _Type}] = PrefList,
+  [IndexNode] = PrefList,
   riak_core_vnode_master:sync_spawn_command(IndexNode, Command, rc_example_vnode_master).
 
 coverage_command(Command) ->
