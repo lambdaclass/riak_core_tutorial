@@ -115,7 +115,12 @@ handle_coverage(keys, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
 handle_coverage(values, _KeySpaces, {_, ReqId, _}, State = #{data := Data}) ->
   log("Received values coverage", State),
   Values = maps:values(Data),
-  {reply, {ReqId, Values}, State}.
+  {reply, {ReqId, Values}, State};
+
+handle_coverage(clear, _KeySpaces, {_, ReqId, _}, State) ->
+  log("Received clear coverage", State),
+  NewState = State#{data => #{}},
+  {reply, {ReqId, []}, NewState}.
 
 handle_exit(_Pid, _Reason, State) ->
   {noreply, State}.
