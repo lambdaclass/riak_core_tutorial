@@ -84,7 +84,7 @@ coverage_test(Config) ->
   Node1 = ?config(node1, Config),
   Node2 = ?config(node2, Config),
 
-  %% clear, should contain no keys and no
+  %% clear, should contain no keys and no values
   {ok, []} = rc_command(Node1, clear),
   {ok, []} = rc_command(Node1, keys),
   {ok, []} = rc_command(Node1, values),
@@ -96,38 +96,23 @@ coverage_test(Config) ->
                     ok = rc_command(Node1, put, [ToKey(N), ToValue(N)])
                 end, Range),
 
-  %% convert the coverage result to a plain list
-  CleanList = fun({ok, List}) ->
-                  lists:foldl(fun({_Partition, _Node, Values}, Accum) ->
-                                  lists:append(Accum, Values)
-                              end, [], List)
-              end,
-
-  SameElements = fun (L1, L2) ->
-                  S1 = sets:from_list(L1),
-                  S2 = sets:from_list(L2),
-                  sets:is_subset(S1, S2) andalso sets:is_subset(S2, S1)
-              end,
-
-  ActualKeys = CleanList(rc_command(Node2, keys)),
-  ActualValues = CleanList(rc_command(Node2, values)),
+  ActualKeys = rc_coverage(Node2, keys),
+  ActualValues = rc_coverage(Node2, values),
 
   100 = length(ActualKeys),
   100 = length(ActualValues),
 
-  true = SameElements(ActualKeys, lists:map(ToKey, Range)),
-  true = SameElements(ActualValues, lists:map(ToValue, Range)),
+  true = have_same_elements(ActualKeys, lists:map(ToKey, Range)),
+  true = have_same_elements(ActualValues, lists:map(ToValue, Range)),
 
   ok.
 
 %%% internal
 start_node(NodeName, WebPort, HandoffPort) ->
+  %% need to set the code path so the same modules are available in the slave
   CodePath = code:get_path(),
   PathFlag = "-pa " ++ lists:concat(lists:join(" ", CodePath)),
   {ok, _} = ct_slave:start(NodeName, [{erl_flags, PathFlag}]),
-
-  %% need to set the code path so the same modules are available in the slave
-  rpc:call(NodeName, code, set_path, [code:get_path()]),
 
   %% set the required environment for riak core
   DataDir = "./data/" ++ atom_to_list(NodeName),
@@ -155,3 +140,15 @@ rc_command(Node, Command) ->
   rc_command(Node, Command, []).
 rc_command(Node, Command, Arguments) ->
   rpc:call(Node, rc_example, Command, Arguments).
+
+rc_coverage(Node, Command) ->
+  {ok, List} = rc_command(Node, Command),
+  %% convert the coverage result to a plain list
+  lists:foldl(fun({_Partition, _Node, Values}, Accum) ->
+                  lists:append(Accum, Values)
+              end, [], List).
+
+have_same_elements(List1, List2) ->
+  S1 = sets:from_list(List1),
+  S2 = sets:from_list(List2),
+  sets:is_subset(S1, S2) andalso sets:is_subset(S2, S1).
