@@ -40,7 +40,8 @@ values() ->
   coverage_command(values).
 
 clear() ->
-  coverage_command(clear).
+  {ok, []} = coverage_command(clear),
+  ok.
 
 %% internal
 hash_key(Key) ->

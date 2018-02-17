@@ -85,7 +85,7 @@ coverage_test(Config) ->
   Node2 = ?config(node2, Config),
 
   %% clear, should contain no keys and no values
-  {ok, []} = rc_command(Node1, clear),
+  ok = rc_command(Node1, clear),
   {ok, []} = rc_command(Node1, keys),
   {ok, []} = rc_command(Node1, values),
 
