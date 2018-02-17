@@ -9,7 +9,8 @@
          get/1,
          delete/1,
          keys/0,
-         values/0
+         values/0,
+         clear/0
         ]).
 
 %% @doc Pings a random vnode to make sure communication is functional
@@ -37,6 +38,10 @@ keys() ->
 
 values() ->
   coverage_command(values).
+
+clear() ->
+  {ok, []} = coverage_command(clear),
+  ok.
 
 %% internal
 hash_key(Key) ->
