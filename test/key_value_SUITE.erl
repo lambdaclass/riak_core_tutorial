@@ -43,11 +43,40 @@ ping_test(Config) ->
 
   ok.
 
-key_value_test(_Config) ->
-  %% set three keys, retrieve them
-  %% replace one, retrieve it
-  %% delete one, retrieve it
-  %% set again, retrieve it
+key_value_test(Config) ->
+  Node1 = ?config(node1, Config),
+  Node2 = ?config(node2, Config),
+  Node3 = ?config(node3, Config),
+
+  ok = rc_command(Node1, put, [k1, v1]),
+  ok = rc_command(Node1, put, [k2, v2]),
+  ok = rc_command(Node1, put, [k3, v3]),
+
+  %% get from any of the nodes
+  v1 = rc_command(Node1, get, [k1]),
+  v2 = rc_command(Node1, get, [k2]),
+  v3 = rc_command(Node1, get, [k3]),
+  not_found = rc_command(Node1, get, [k10]),
+
+  v1 = rc_command(Node2, get, [k1]),
+  v2 = rc_command(Node2, get, [k2]),
+  v3 = rc_command(Node2, get, [k3]),
+  not_found = rc_command(Node2, get, [k10]),
+
+  v1 = rc_command(Node3, get, [k1]),
+  v2 = rc_command(Node3, get, [k2]),
+  v3 = rc_command(Node3, get, [k3]),
+  not_found = rc_command(Node3, get, [k10]),
+
+  ok = rc_command(Node1, put, [k1, v_new]),
+  v_new = rc_command(Node1, get, [k1]),
+
+  v_new = rc_command(Node1, delete, [k1]),
+  not_found = rc_command(Node1, get, [k1]),
+
+  ok = rc_command(Node1, put, [k1, v_new]),
+  v_new = rc_command(Node1, get, [k1]),
+
   ok.
 
 coverage_test(_Config) ->
@@ -75,6 +104,7 @@ start_node(NodeName, WebPort, HandoffPort) ->
   rpc:call(NodeName, application, set_env, [riak_core, handoff_port, HandoffPort]),
   rpc:call(NodeName, application, set_env, [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
 
+  %% TODO try this syntax
   %% Environment = [{ring_state_dir, "./data/ring"},
   %%                {web_port, WebPort},
   %%                {handoff_port, HandoffPort},
