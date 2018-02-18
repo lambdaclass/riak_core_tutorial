@@ -1,49 +1,49 @@
 # Riak Core Tutorial [![Build Status](https://travis-ci.org/lambdaclass/riak_core_tutorial.svg?branch=master)](https://travis-ci.org/lambdaclass/riak_core_tutorial)
 
-A basic example of a riak_core application, using the most
+This repository contains an example riak_core application using the most
 recent version of the [riak_core_ng fork](https://hex.pm/packages/riak_core_ng)
-and running on Erlang/OTP 20 with rebar3.
+and running on Erlang/OTP 20 with rebar3. 
 
-This example was largely based on the
+Below is a detailed [tutorial](/#riak-core-tutorial) that explains the step-by-step process to
+produce the same code base from scratch.
+
+The project and tutorial structure were largely based on the
 [Little Riak Core Book](https://marianoguerra.github.io/little-riak-core-book/)
 and the
 [Create a riak_core application in Elixir](https://medium.com/@GPad/create-a-riak-core-application-in-elixir-part-1-41354c1f26c3)
 series.
 
-The code on this repository can be used directly by cloning it; see [Usage](/#usage)
-for example commands. Alternatively,
-the [Tutorial](/#riak-core-tutorial) explains the step-by-step process to
-produce the same code base from scratch.
+## Contents
 
-   * [Riak Core Tutorial](#riak-core-tutorial-)
-      * [Example application usage](#example-application-usage)
-      * [Riak Core Tutorial](#riak-core-tutorial)
-         * [When to use Riak Core](#when-to-use-riak-core)
-         * [About this tutorial](#about-this-tutorial)
-         * [Useful links](#useful-links)
-         * [0. Riak Core overview](#0-riak-core-overview)
-         * [1. Setup](#1-setup)
-         * [2. The vnode](#2-the-vnode)
-            * [The riak_vnode behavior](#the-riak_vnode-behavior)
-            * [Application and supervisor setup](#application-and-supervisor-setup)
-            * [Sending commands to the vnode](#sending-commands-to-the-vnode)
-         * [3. Setting up the cluster](#3-setting-up-the-cluster)
-         * [4. Building a distributed Key/Value store](#4-building-a-distributed-keyvalue-store)
-         * [5. Testing](#5-testing)
-            * [Test implementations](#test-implementations)
-            * [ct_slave magic](#ct_slave-magic)
-         * [6. Coverage commands](#6-coverage-commands)
-            * [Handle coverage commands in the vnode](#handle-coverage-commands-in-the-vnode)
-            * [The coverage FSM](#the-coverage-fsm)
-            * [Coverage FSM Supervision](#coverage-fsm-supervision)
-            * [Putting it all together](#putting-it-all-together)
-            * [Coverage test](#coverage-test)
-         * [7. Redundancy and fault-tolerance](#7-redundancy-and-fault-tolerance)
-         * [8. Handoff](#8-handoff)
-            * [When does handoff occur?](#when-does-handoff-occur)
-            * [Vnode implementation](#vnode-implementation)
-            * [Ownership handoff example](#ownership-handoff-example)
-            * [Hinted handoff example](#hinted-handoff-example)
+  * [Example application usage](#example-application-usage)
+  * [Riak Core Tutorial](#riak-core-tutorial)
+     * [When to use Riak Core](#when-to-use-riak-core)
+     * [About this tutorial](#about-this-tutorial)
+     * [Useful links](#useful-links)
+     * [0. Riak Core overview](#0-riak-core-overview)
+     * [1. Setup](#1-setup)
+     * [2. The vnode](#2-the-vnode)
+        * [The riak_vnode behavior](#the-riak_vnode-behavior)
+        * [Application and supervisor setup](#application-and-supervisor-setup)
+        * [Sending commands to the vnode](#sending-commands-to-the-vnode)
+     * [3. Setting up the cluster](#3-setting-up-the-cluster)
+     * [4. Building a distributed Key/Value store](#4-building-a-distributed-keyvalue-store)
+     * [5. Testing](#5-testing)
+        * [Test implementations](#test-implementations)
+        * [ct_slave magic](#ct_slave-magic)
+     * [6. Coverage commands](#6-coverage-commands)
+        * [Handle coverage commands in the vnode](#handle-coverage-commands-in-the-vnode)
+        * [The coverage FSM](#the-coverage-fsm)
+        * [Coverage FSM Supervision](#coverage-fsm-supervision)
+        * [Putting it all together](#putting-it-all-together)
+        * [Coverage test](#coverage-test)
+     * [7. Redundancy and fault-tolerance](#7-redundancy-and-fault-tolerance)
+     * [8. Handoff](#8-handoff)
+        * [When does handoff occur?](#when-does-handoff-occur)
+        * [Vnode implementation](#vnode-implementation)
+        * [Ownership handoff example](#ownership-handoff-example)
+        * [Hinted handoff example](#hinted-handoff-example)
+
 
 ## Example application usage
 Run on three separate terminals:
