@@ -15,9 +15,9 @@ for example commands. Alternatively,
 the [Tutorial](/#riak-core-tutorial) explains the step-by-step process to
 produce the same code base from scratch.
 
-   * [Riak Core Tutorial](#riak-core-tutorial)
+   * [Riak Core Tutorial](#riak-core-tutorial-)
       * [Example application usage](#example-application-usage)
-      * [Riak Core Tutorial](#riak-core-tutorial-1)
+      * [Riak Core Tutorial](#riak-core-tutorial)
          * [When to use Riak Core](#when-to-use-riak-core)
          * [About this tutorial](#about-this-tutorial)
          * [Useful links](#useful-links)
@@ -30,6 +30,8 @@ produce the same code base from scratch.
          * [3. Setting up the cluster](#3-setting-up-the-cluster)
          * [4. Building a distributed Key/Value store](#4-building-a-distributed-keyvalue-store)
          * [5. Testing](#5-testing)
+            * [Test implementations](#test-implementations)
+            * [ct_slave magic](#ct_slave-magic)
          * [6. Coverage commands](#6-coverage-commands)
             * [Handle coverage commands in the vnode](#handle-coverage-commands-in-the-vnode)
             * [The coverage FSM](#the-coverage-fsm)
@@ -853,7 +855,220 @@ effort by just handling your application-specific logic in a vnode module.
 
 ### 5. Testing
 
-TODO #7
+Our application already has some basic functionality so we should
+start thinking about how to test it. This is a
+distributed system that requires multiple nodes to work and manual tests
+will become more difficult as it grows; moreover, since most of the
+complexity resides in the interaction of its components,
+we won't benefit much from isolated unit tests, instead we should
+write an integration suite that provides end-to-end verification of each
+feature. To accomplish that we will use
+[Common Tests](http://erlang.org/doc/apps/common_test/basics_chapter.html),
+and a combination of
+[ct_slave](http://erlang.org/doc/man/ct_slave.html)
+and [rpc](http://erlang.org/doc/man/rpc.html) to start multiple nodes
+and interact with them.
+
+#### Test implementations
+
+To start off, let's add a new make target that runs the tests with
+rebar3 (remember to add it in the .PHONY targets):
+
+``` makefile
+.PHONY: dev1 dev2 dev3 dev4 clean_data test
+
+test:
+	./rebar3 ct --name test@127.0.0.1
+```
+
+Now create a test directory with a single module
+`test/key_value_SUITE.erl`:
+
+``` erlang
+-module(key_value_SUITE).
+
+-include_lib("common_test/include/ct.hrl").
+
+-compile(export_all).
+
+all() ->
+  [ping_test,
+   key_value_test].
+
+init_per_suite(Config) ->
+  Node1 = 'node1@127.0.0.1',
+  Node2 = 'node2@127.0.0.1',
+  Node3 = 'node3@127.0.0.1',
+  start_node(Node1, 8198, 8199),
+  start_node(Node2, 8298, 8299),
+  start_node(Node3, 8398, 8399),
+
+  build_cluster(Node1, Node2, Node3),
+
+  [{node1, Node1},
+   {node2, Node2},
+   {node3, Node3} | Config].
+
+end_per_suite(Config) ->
+  Node1 = ?config(node1, Config),
+  Node2 = ?config(node2, Config),
+  Node3 = ?config(node3, Config),
+  stop_node(Node1),
+  stop_node(Node2),
+  stop_node(Node3),
+  ok.
+```
+
+We include the ct header file and declare two tests in the `all()`
+callback, which we'll define shortly. In `init_per_suite`
+ we create three nodes using the `start_node` helper, and make them
+ join a cluster with `build_cluster`; we keep the node names in the
+ test configuration so we can later use it to remotely execute
+ functions in those nodes; finally we stop the nodes in
+    `end_per_suite` using another helper. We'll leave the
+ implementations, which contain most of the ct_slave magic, for the end
+ of this section. Now let's focus in the tests:
+
+ ```erlang
+ping_test(Config) ->
+  Node1 = ?config(node1, Config),
+  Node2 = ?config(node2, Config),
+  Node3 = ?config(node3, Config),
+
+  {pong, _Partition1} = rc_command(Node1, ping),
+  {pong, _Partition2} = rc_command(Node2, ping),
+  {pong, _Partition3} = rc_command(Node3, ping),
+
+  ok.
+
+key_value_test(Config) ->
+  Node1 = ?config(node1, Config),
+  Node2 = ?config(node2, Config),
+  Node3 = ?config(node3, Config),
+
+  ok = rc_command(Node1, put, [k1, v1]),
+  ok = rc_command(Node1, put, [k2, v2]),
+  ok = rc_command(Node1, put, [k3, v3]),
+
+  %% get from any of the nodes
+  v1 = rc_command(Node1, get, [k1]),
+  v2 = rc_command(Node1, get, [k2]),
+  v3 = rc_command(Node1, get, [k3]),
+  not_found = rc_command(Node1, get, [k10]),
+
+  v1 = rc_command(Node2, get, [k1]),
+  v2 = rc_command(Node2, get, [k2]),
+  v3 = rc_command(Node2, get, [k3]),
+  not_found = rc_command(Node2, get, [k10]),
+
+  v1 = rc_command(Node3, get, [k1]),
+  v2 = rc_command(Node3, get, [k2]),
+  v3 = rc_command(Node3, get, [k3]),
+  not_found = rc_command(Node3, get, [k10]),
+
+  %% test reset and delete
+  ok = rc_command(Node1, put, [k1, v_new]),
+  v_new = rc_command(Node1, get, [k1]),
+
+  v_new = rc_command(Node1, delete, [k1]),
+  not_found = rc_command(Node1, get, [k1]),
+
+  ok = rc_command(Node1, put, [k1, v_new]),
+  v_new = rc_command(Node1, get, [k1]),
+
+  ok.
+ ```
+
+The `ping_test` just sends a `ping` command to each of the nodes, and
+makes sure it gets a `pong` response every time. Note we use an
+`rc_command` helper, which executes a command of our rc_example
+application in the given node. The `key_value_test` puts some keys in
+the store through the first node, then makes sure those keys can be
+retrieved from any of the nodes (regardless of where they are actually
+stored), then it tests the delete command and makes sure the store
+generally works as expected.
+
+There's nothing special about these tests when we abstract away the
+details of setting up the nodes and the riak_core cluster.
+
+#### ct_slave magic
+
+Let's look at the implementation of the different helpers we used in the
+previous section. We need the `start_node` helper to
+create a new Erlang node with a given name, and we need it to start our
+rc_example application, much like what happens when we run our
+development releases; for this to work we should also set up the
+required riak_core application environment:
+
+
+``` erlang
+start_node(NodeName, WebPort, HandoffPort) ->
+  %% need to set the code path so the same modules are available in the slave
+  CodePath = code:get_path(),
+  PathFlag = "-pa " ++ lists:concat(lists:join(" ", CodePath)),
+  {ok, _} = ct_slave:start(NodeName, [{erl_flags, PathFlag}]),
+
+  %% set the required environment for riak core
+  DataDir = "./data/" ++ atom_to_list(NodeName),
+  rpc:call(NodeName, application, load, [riak_core]),
+  rpc:call(NodeName, application, set_env, [riak_core, ring_state_dir, DataDir]),
+  rpc:call(NodeName, application, set_env, [riak_core, platform_data_dir, DataDir]),
+  rpc:call(NodeName, application, set_env, [riak_core, web_port, WebPort]),
+  rpc:call(NodeName, application, set_env, [riak_core, handoff_port, HandoffPort]),
+  rpc:call(NodeName, application, set_env, [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
+
+  %% start the rc_example app
+  {ok, _} = rpc:call(NodeName, application, ensure_all_started, [rc_example]),
+
+  ok.
+
+stop_node(NodeName) ->
+  ct_slave:stop(NodeName).
+```
+
+ct_slave makes it pretty simple to manage erlang nodes with the
+[`ct_slave:start`](http://erlang.org/doc/man/ct_slave.html#start-2)
+and [`ct_slave:stop`](http://erlang.org/doc/man/ct_slave.html#stop-1)
+functions. The gotcha is that when we start a new node we need to
+point the code path to Erlang, in order for the node to know where to
+look for code dependencies. The best way I've found to do it, based on
+[this thread](http://erlang.org/pipermail/erlang-questions/2016-March/088428.html),
+is to get the path from the master node that runs the test, and pass
+it to Erlang with the `-pa` flag. There is probably
+a more succint way to do this, for example using `code:set_path`, but
+I couldn't make it work.
+
+Once the node is up, we can start running functions on it with
+[`rpc:call`](http://erlang.org/doc/man/rpc.html#call-4). In order for
+riak_core to work, we need to load the
+application and fill its environment with `application:set_env`; we
+set the same variables as we did in `conf/sys.config`, with the addition of
+`platform_data_dir` (this is a directory that riak_core uses to store
+metadata; we need to set it explicitly here because otherwise the
+three nodes would conflict trying to write in the same default directory). With
+the configuration in place, we can start the rc_example app remotely
+calling `application:ensure_all_started`. Lastly, the `stop_node`
+helper just needs to call `ct_slave:stop`.
+
+When our three nodes are up with the application running, we need to
+connect them to build the cluster, like we did from the shell:
+
+``` erlang
+build_cluster(Node1, Node2, Node3) ->
+  rpc:call(Node2, riak_core, join, [Node1]),
+  rpc:call(Node3, riak_core, join, [Node1]),
+  ok.
+```
+
+The last helper, `rc_command`, is a very simple one, it just remotely
+calls one of the functions in the `rc_example` module:
+
+``` erlang
+rc_command(Node, Command) ->
+  rc_command(Node, Command, []).
+rc_command(Node, Command, Arguments) ->
+  rpc:call(Node, rc_example, Command, Arguments).
+```
 
 ### 6. Coverage commands
 
