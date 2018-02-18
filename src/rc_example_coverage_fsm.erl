@@ -43,7 +43,7 @@ process_results({{_ReqId, {Partition, Node}}, Data},
   {done, State#{accum => NewAccum}}.
 
 finish(clean, State = #{req_id := ReqId, from := From, accum := Accum}) ->
-  lager:info("Finished coverate request ~p", [ReqId]),
+  lager:info("Finished coverage request ~p", [ReqId]),
 
   %% send the result back to the caller
   From ! {ReqId, {ok, Accum}},

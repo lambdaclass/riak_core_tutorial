@@ -42,7 +42,8 @@ produce the same code base from scratch.
          * [8. Handoff](#8-handoff)
             * [When does handoff occur?](#when-does-handoff-occur)
             * [Vnode implementation](#vnode-implementation)
-            * [Handoff test](#handoff-test)
+            * [Ownership handoff example](#ownership-handoff-example)
+            * [Hinted handoff example](#hinted-handoff-example)
 
 ## Example application usage
 Run on three separate terminals:
@@ -1584,7 +1585,7 @@ them
 [here](https://github.com/rzezeski/try-try-try/tree/master/2011/riak-core-conflict-resolution) and [here](https://github.com/basho/riak_core/commit/036e409eb83903315dd43a37c7a93c9256863807).
 
 #### Vnode implementation
-If you check our vnode implementation, you'll notice half of the
+If you check our vnode implementation, you'll notice that half of the
 callbacks deal with handoff. Let's go over their
 implementation, in the same order as they are called.
 
@@ -1744,9 +1745,173 @@ delete(State) ->
   log("deleting the vnode", State),
   {ok, State#{data => #{}}}.
 ```
-#### Handoff test
-TODO
+#### Ownership handoff example
+Handoff is a slow process, so it would be inconvenient to test it as
+part of our integration suite. Instead, let's do some shell
+experiments to see it in action. Clean the cluster and start three
+nodes:
 
-* fill data, remove a node with data from the cluster, see that
-  another node takes over the key
-* put the node back, see it recovers the key ownership
+``` shell
+# terminal 1
+$ make clean_data
+$ make dev1
+
+# terminal 2
+$ make dev2
+
+# terminal 3
+$ make dev3
+```
+
+When the nodes are running, join the cluser as we did before:
+
+``` erlang
+%% node 2
+(rc_example2@127.0.0.1)1> riak_core:join('rc_example1@127.0.0.1').
+18:46:45.409 [info] 'rc_example2@127.0.0.1' changed from 'joining' to 'valid'
+
+%% node 3
+(rc_example3@127.0.0.1)1> riak_core:join('rc_example1@127.0.0.1').
+18:46:47.120 [info] 'rc_example3@127.0.0.1' changed from 'joining' to 'valid'
+```
+
+You may see a bunch of handoff messages now. Eventually the cluster
+will settle, with the ring evenly distributed across nodes:
+
+``` erlang
+(rc_example1@127.0.0.1)3> rc_example:ring_status().
+==================================== Nodes ====================================
+Node a: 21 ( 32.8%) rc_example1@127.0.0.1
+Node b: 22 ( 34.4%) rc_example2@127.0.0.1
+Node c: 21 ( 32.8%) rc_example3@127.0.0.1
+==================================== Ring =====================================
+abcc|abcc|abcc|abcc|abcc|abcc|abcc|abcc|abcc|abcc|abbc|abba|abba|abba|abba|abba|
+ok
+```
+
+Let's add a key, and use the `keys` function to find out what node
+it ends up in:
+
+
+``` erlang
+(rc_example1@127.0.0.1)4> rc_example:put(k1, hello).
+ok
+(rc_example1@127.0.0.1)5> rc_example:keys().
+{ok,[{1141798154164767904846628775559596109106197299200,
+      'rc_example2@127.0.0.1', [k1]}]}
+```
+
+In my case, `k1` is routed to the second node `
+'rc_example2@127.0.0.1'` (it can be a different one in your
+machine). Let's see what happens if we make that node (the one that
+holds the Key/Value pair) leave the cluster:
+
+``` erlang
+(rc_example2@127.0.0.1)2> riak_core:leave().
+ok
+```
+
+You'll get a bunch of handoff logs again in your screen. During this
+period, `rc_example:ring_status()` will show the
+percentage of the ring assigned to the node decreasing until it
+reaches zero. After this the node will be shutdown, and from any of
+the remaining nodes you'll see something like this:
+
+``` erlang
+14:53:24.322 [info] 'rc_example2@127.0.0.1' changed from 'leaving' to 'exiting'
+14:53:24.351 [info] 'rc_example2@127.0.0.1' removed from cluster
+(previously: 'exiting')
+(rc_example1@127.0.0.1)6> rc_example:ring_status().
+==================================== Nodes ====================================
+Node a: 32 ( 50.0%) rc_example1@127.0.0.1
+Node b: 32 ( 50.0%) rc_example3@127.0.0.1
+==================================== Ring =====================================
+abab|abab|abab|abab|abab|abab|abab|abab|abab|abab|abab|abab|abab|abab|abab|abab|
+ok
+```
+
+Now the entire ring is distributed among the two remaining nodes. If
+we now query for `k1`, we'll confirm that another one took ownership
+of that key:
+
+``` erlang
+(rc_example1@127.0.0.1)7> rc_example:get(k1).
+hello
+{ok,[{1141798154164767904846628775559596109106197299200,
+      'rc_example1@127.0.0.1', [k1]}]}
+```
+
+In my case, it is `'rc_example1@127.0.0.1'` that took over that part
+of the ring.
+
+#### Hinted handoff example
+
+The previous section demonstrated what happens when we intentionally
+change the cluster by removing a node. Now let's see what happens when
+there's a failure and a node becomes unexpectedly unavailable. We
+didn't add replication as discussed in
+the [fault-tolerance section](#7-redundancy-and-fault-tolerance), so
+we can't expect to preserve data from the failing node, but we can see
+the hinted handoff mechanics anyway: the failing node won't lose
+ownership of its partitions, but the commands that arrive while it's down will
+have to be temporarily routed to available nodes. When the
+failing node comes back online, it will receive handoffs with the data
+created while it was down.
+
+Repeat the steps from previous section to clean the data, restart the
+nodes and join the cluster. Set a key again, and check in which node
+it resides:
+
+``` erlang
+(rc_example1@127.0.0.1)3> rc_example:put(k1, hello).
+ok
+(rc_example1@127.0.0.1)4> rc_example:keys().
+{ok,[{1141798154164767904846628775559596109106197299200,
+      'rc_example2@127.0.0.1', [k1]}]}
+```
+
+In this case, `k1` physically resides in
+`'rc_example2@127.0.0.1'`. Kill that node with `ctrl-g q` or a similar
+command. At this point the `k1` key and its value will be lost,
+because we don't have any kind of data replication; but if you put the
+key again, you'll notice it will be saved in one of the live nodes:
+
+``` erlang
+(rc_example1@127.0.0.1)6> rc_example:get(k1).
+not_found
+(rc_example1@127.0.0.1)7> rc_example:put(k1, newvalue).
+ok
+(rc_example1@127.0.0.1)8> rc_example:get(k1).
+newvalue
+```
+
+Now start the killed node again, and try to retrieve `k1`:
+
+``` erlang
+(rc_example1@127.0.0.1)9> rc_example:get(k1).
+not_found
+```
+
+The second node recovered ownership of the partition to which `k1`
+belongs, but doesn't (yet) have any value for it. If you wait a while
+(around a minute in my laptop), you should see something along these lines:
+
+```
+16:20:56.845 [info] [ND1G8YLUY5OVK16UNH2ZITWHUUGHOU8] starting handoff
+16:20:56.860 [info] Starting hinted transfer of rc_example_vnode from 'rc_example1@127.0.0.1' 1141798154164767904846628775559596109106197299200 to 'rc_example2@127.0.0.1' 1141798154164767904846628775559596109106197299200
+16:20:56.860 [info] [ND1G8YLUY5OVK16UNH2ZITWHUUGHOU8] Received fold request for handoff
+16:20:56.862 [info] hinted transfer of rc_example_vnode from 'rc_example1@127.0.0.1' 1141798154164767904846628775559596109106197299200 to 'rc_example2@127.0.0.1' 1141798154164767904846628775559596109106197299200 completed: sent 32.00 B bytes in 1 of 1 objects in 0.00 seconds (63.78 KB/second)
+16:20:56.862 [info] [ND1G8YLUY5OVK16UNH2ZITWHUUGHOU8] finished handoff
+```
+
+The fallback node that temporarily held `k1` handed over its data back
+to the vnode in rc_example2. If you get the key again, you should see
+the new value, this time coming from rc_example2:
+
+``` erlang
+(rc_example1@127.0.0.1)10> rc_example:get(k1).
+newvalue
+(rc_example1@127.0.0.1)11> rc_example:keys().
+{ok,[{1141798154164767904846628775559596109106197299200,
+      'rc_example2@127.0.0.1', [k1]}]}
+```
