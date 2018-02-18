@@ -1347,7 +1347,113 @@ and physical node they come from. We also see the `received keys
 coverage` output from every vnode when they receive the command.
 
 #### Coverage test
-TODO
+
+We need to test our new functionality. Before writing an
+integration test, let's quickly add a `clear` coverage command to
+empty our database, which will come in handy next. Add a new
+`handle_coverage` clause in `src/rc_example_vnode.erl`:
+
+``` erlang
+handle_coverage(clear, _KeySpaces, {_, ReqId, _}, State) ->
+  log("Received clear coverage", State),
+  NewState = State#{data => #{}},
+  {reply, {ReqId, []}, NewState}.
+```
+
+When the `clear` command is received, the vnode will empty the data
+map in its internal state. Note we return an empty list because our
+coverage fsm expects to get a list from each vnode; if the new command
+required a different result manipulation we could consider adding a another
+`process_results` clause in the fsm or even an entirely separate fsm
+module; in this case we don't really care about results processing,
+just the side effect of clearing the vnode data.
+
+We will also add the `clear` function to the public API in
+`src/rc_example.erl`. It will just call `coverage_command` and return `ok`.
+
+``` erlang
+-export([clear/0]).
+
+clear() ->
+  {ok, []} = coverage_command(clear),
+  ok.
+```
+
+With that in place let's test our coverage commands in
+`test/key_value_SUITE.erl`:
+
+``` erlang
+all() ->
+  [ping_test,
+   key_value_test,
+   coverage_test].
+
+%% ...
+
+coverage_test(Config) ->
+  Node1 = ?config(node1, Config),
+  Node2 = ?config(node2, Config),
+
+  %% clear, should contain no keys and no values
+  ok = rc_command(Node1, clear),
+  [] = rc_coverage(Node1, keys),
+  [] = rc_coverage(Node1, values),
+
+  ToKey = fun (N) -> "key" ++ integer_to_list(N) end,
+  ToValue = fun (N) -> "value" ++ integer_to_list(N) end,
+  Range = lists:seq(1, 100),
+  lists:foreach(fun(N) ->
+                    ok = rc_command(Node1, put, [ToKey(N), ToValue(N)])
+                end, Range),
+
+  ActualKeys = rc_coverage(Node2, keys),
+  ActualValues = rc_coverage(Node2, values),
+
+  100 = length(ActualKeys),
+  100 = length(ActualValues),
+
+  true = have_same_elements(ActualKeys, lists:map(ToKey, Range)),
+  true = have_same_elements(ActualValues, lists:map(ToValue, Range)),
+
+  %% store should be empty after a new clear
+  ok = rc_command(Node1, clear),
+  [] = rc_coverage(Node1, keys),
+  [] = rc_coverage(Node1, values),
+
+  ok.
+
+%% internal
+rc_coverage(Node, Command) ->
+  {ok, List} = rc_command(Node, Command),
+  %% convert the coverage result to a plain list
+  lists:foldl(fun({_Partition, _Node, Values}, Accum) ->
+                  lists:append(Accum, Values)
+              end, [], List).
+
+have_same_elements(List1, List2) ->
+  S1 = sets:from_list(List1),
+  S2 = sets:from_list(List2),
+  sets:is_subset(S1, S2) andalso sets:is_subset(S2, S1).
+```
+
+The `coverage_test` first calls `clear` to empty the store, and makes
+sure `keys` and `values` return an empty result. Note that our
+integration suite is not ideal in the sense that the tests are not
+isolated from each other: they share the same data store and they
+couldn't, for example, be run concurrently. In a real world
+project we could consider creating new nodes for each test
+(although this could be slow) or more likely introduce some sort of
+namespacing in our data store (perhaps through the use of buckets). For
+the purposes of this tutorial, though, it's enough to clear the store
+in this particular test.
+
+The test continues by storing a range of 100 keys and values in our
+database and calling the `keys` and `values` commands. We assert that
+the results contain 100 elements each and we use some sets logic to check that
+the elements are the same that we originally inserted. Finally, we
+clear the store again and check `keys` and `values` come back
+empty. The `rc_coverage` helper just calls a command and cleans the
+result by removing the partition and node annotations.
 
 ### 7. Redundancy and fault-tolerance
 

@@ -86,8 +86,8 @@ coverage_test(Config) ->
 
   %% clear, should contain no keys and no values
   ok = rc_command(Node1, clear),
-  {ok, []} = rc_command(Node1, keys),
-  {ok, []} = rc_command(Node1, values),
+  [] = rc_coverage(Node1, keys),
+  [] = rc_coverage(Node1, values),
 
   ToKey = fun (N) -> "key" ++ integer_to_list(N) end,
   ToValue = fun (N) -> "value" ++ integer_to_list(N) end,
@@ -104,6 +104,11 @@ coverage_test(Config) ->
 
   true = have_same_elements(ActualKeys, lists:map(ToKey, Range)),
   true = have_same_elements(ActualValues, lists:map(ToValue, Range)),
+
+  %% store should be empty after a new clear
+  ok = rc_command(Node1, clear),
+  [] = rc_coverage(Node1, keys),
+  [] = rc_coverage(Node1, values),
 
   ok.
 
