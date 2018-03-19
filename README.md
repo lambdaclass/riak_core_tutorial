@@ -177,6 +177,8 @@ Note this distribution isn't fixed as the keyspace partitioning
 is: the vnode distribution can change if a physical node is added
 to the cluster or goes down.
 
+You can find a more detailed demonstration of consistent hashing [here](http://blog.carlosgaldino.com/consistent-hashing.html).
+
 ### 1. Setup
 
 In this tutorial we'll build an in-memory, distributed key/value
