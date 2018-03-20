@@ -142,7 +142,7 @@ series, which were our main references.
   [Part III](https://medium.com/@GPad/create-a-riak-core-application-in-elixir-part-3-8bac36632be0),
   [Part IV](https://medium.com/@GPad/create-a-riak-core-application-in-elixir-part-4-728512ece224) and
   [Part V](https://medium.com/@GPad/create-a-riak-core-application-in-elixir-part-5-86cd9d2c6b92)
-* [A Gentle Introduction to Riak Core](http://efcasado.github.io/riak-core_intro/)
+* [A Gentle Introduction to Riak Core](http://efcasado.github.io/riak-core_intro)
 * Understanding Riak Core:
   [Handoff](http://basho.com/posts/technical/understanding-riak_core-handoff/),
   [Building Handoff](http://basho.com/posts/technical/understanding-riak_core-building-handoff/)
