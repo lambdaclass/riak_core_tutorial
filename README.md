@@ -179,6 +179,10 @@ to the cluster or goes down.
 
 You can find a more detailed demonstration of consistent hashing [here](http://blog.carlosgaldino.com/consistent-hashing.html).
 
+This architecture enables several desirable properties in our system: high 
+avalability, incremental scalability and decentralization, with a low operational
+cost. You can find a detailed discussion of these properties in the [Dynamo paper](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf).
+
 ### 1. Setup
 
 In this tutorial we'll build an in-memory, distributed key/value
