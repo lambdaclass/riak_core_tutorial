@@ -2,7 +2,7 @@
 
 This repository contains an example riak_core application using the most
 recent version of the [riak_core_ng fork](https://hex.pm/packages/riak_core_ng)
-and running on Erlang/OTP 20 with rebar3. 
+and running on Erlang/OTP 21 with rebar3.
 
 Below is a detailed [tutorial](/#riak-core-tutorial) that explains the step-by-step process to
 produce the same code base from scratch.
@@ -112,14 +112,14 @@ Basho, the company that originally developed Riak and Riak Core was
 put into receivership in 2017. This introduces some uncertainty about the
 future of these products, although the community has shown interest in
 taking over their maintenance. At the moment of writing,
-the [riak_core_ng](https://github.com/Kyorai/riak_core) fork seems to
-be the most actively maintained fork of Riak Core and hopefully the work being
+the [riak_core_ng](https://github.com/Kyorai/riak_core) fork is
+the most actively maintained fork of Riak Core and hopefully the work being
 done there will eventually be merged back to the canonical repository.
 
 As part of our interest in this technology and our intention to use it
 in new projects we had to struggle a bit with scarce and outdated
 documenatation, stale dependencies, etc. The intention is thus to
-provide a tutorial on how to use Riak Core today, on an Erlang 20
+provide a tutorial on how to use Riak Core today, on an Erlang 21
 and rebar3 project, with minimal dependencies and operational
 sugar. You'll notice the structure borrows heavily from
 the
@@ -179,7 +179,7 @@ to the cluster or goes down.
 
 You can find a more detailed demonstration of consistent hashing [here](http://blog.carlosgaldino.com/consistent-hashing.html).
 
-This architecture enables several desirable properties in our system: high 
+This architecture enables several desirable properties in our system: high
 avalability, incremental scalability and decentralization, with a low operational
 cost. You can find a detailed discussion of these properties in the [Dynamo paper](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf).
 
@@ -213,44 +213,15 @@ riak_core dependency and lager, which we'll use for logging:
 
 ``` erlang
 {erl_opts, [debug_info, {parse_transform, lager_transform}]}.
-{deps, [{riak_core, "3.0.9", {pkg, riak_core_ng}}, {lager, "3.5.1"}]}.
+{deps, [{riak_core, "3.1.0", {pkg, riak_core_ng}}, {lager, "3.5.1"}]}.
 ```
 
-Note we're using
-the [`riak_core_ng` fork](https://hex.pm/packages/riak_core_ng), which is
-more up to date so it's easier to make it work with Erlang 20. If you
-go ahead and try to `rebar3 compile` your project, you'll notice it
-fails with this message:
-
-``` shell
-===> Compiling _build/default/lib/riak_ensemble/src/riak_ensemble_test.erl failed
-_build/default/lib/riak_ensemble/src/riak_ensemble_test.erl:21: export_all flag enabled - all functions will be exported
-```
-
-The issue here is that some of the dependencies of riak_core use
-the [warnings_as_errors option](http://erlang.org/doc/man/compile.html),
-and their code contains stuff
-that produces warnings in recent Erlang versions (namely, they use
-`export_all` or `gen_fsm`). To fix this we need to override their
-configuration in our rebar.config file, removing the `warnings_as_errors` option:
-
-``` erlang
-{overrides, [{override, riak_ensemble,
-              [{erl_opts, [debug_info,
-                           warn_untyped_record,
-                           {parse_transform, lager_transform}]}]},
-
-             {override, riak_core,
-              [{erl_opts, [{parse_transform, lager_transform},
-                           debug_info, {platform_define, "^[0-9]+", namespaced_types},
-                           {platform_define, "18", old_rand},
-                           {platform_define, "17", old_rand},
-                           {platform_define, "^R15", old_hash}]}]},
-
-             {override, poolboy,
-              [{erl_opts, [debug_info,
-                           {platform_define, "^[0-9]+", namespaced_types}]}]}]}
-```
+Note that we're using the
+[`riak_core_ng` fork](https://hex.pm/packages/riak_core_ng), which is
+more up to date. Version 3.1.0 introduced support for Erlang 20 and 21 (previously
+some work was required to avoid deprecation
+[warnings_as_errors](http://erlang.org/doc/man/compile.html)). At this point you
+should be able to compile your project running `rebar3 compile`.
 
 Now that the project compiles, let's try to build and run a
 release. First we need to add lager and riak_core to
