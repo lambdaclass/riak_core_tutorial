@@ -270,7 +270,7 @@ ring file: "no such file or directory"`. We need to add some configuration to
   [{ring_state_dir, "./data/ring"},
    {web_port, 8098},
    {handoff_port, 8099},
-   {schema_dirs, ["priv"]}
+   {schema_dirs, ["lib/rc_example-0.1.0/priv"]}
   ]}].
 ```
 
