@@ -108,7 +108,7 @@ A distributed batch job handling system could also use consistent hashing and ro
 
 ### About this tutorial
 
-We're using Bashos' Riak Core for this tutorial,
+We're using Basho's Riak Core for this tutorial,
 you can check it here [riak_core](https://github.com/basho/riak_core),
 as it seems to be maintained at the time of writing this.
 
@@ -567,6 +567,9 @@ and `conf/vm.args` should be treated as templates by adding an
 {overlay, [{template, "conf/sys.config", "releases/{{release_version}}/sys.config"},
            {template, "conf/vm.args", "releases/{{release_version}}/vm.args"}]}
 ```
+
+If you're having problems with the templates, check your rebar3 version 
+and [this github issue](https://github.com/erlang/rebar3/issues/2710).
 
 The template variables' values will be taken from `overlay_vars` files. We will
 define three
