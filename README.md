@@ -525,7 +525,7 @@ response. There are other functions to send commands to a vnode:
 is like `sync_spawn_command` but blocks the vnode_master process).
 
 You can find more details of the functions used in this
-section [here](http://efcasado.github.io/riak-core_intro/). To wrap up
+section [here](http://efcasado.github.io/riak-core_intro). To wrap up
 let's run our `ping` function from the shell:
 
 ``` erlang
