@@ -558,20 +558,19 @@ riak_core in each node (the `web_port` and `handoff_port` tuples in `conf/sys.co
 Since we'll have an almost identical configuration in all of the nodes,
 we'll use the overalys feature that rebar3 inherits from relx. You can
 read about
-it [here](https://www.rebar3.org/docs/releases#section-overlays),
+it [here](https://www.rebar3.org/docs/deployment/releases/#overlays-build-time-configuration),
 although it's not strictly necessary for the
 purposes of this tutorial. First we tell rebar3 that `conf/sys.config`
 and `conf/vm.args` should be treated as templates by adding an
 `overlay` tuple in the `relx` configuration:
-
 ``` erlang
-{overlay, [{template, "conf/sys.config", "releases/{{default_release_version}}/sys.config"},
-           {template, "conf/vm.args", "releases/{{default_release_version}}/vm.args"}]}
+{overlay, [{template, "conf/sys.config", "releases/{{release_version}}/sys.config"},
+           {template, "conf/vm.args", "releases/{{release_version}}/vm.args"}]}
 ```
 
 The template variables' values will be taken from `overlay_vars` files. We will
 define three
-different [rebar profiles](https://www.rebar3.org/docs/profiles) in
+different [rebar profiles](https://www.rebar3.org/docs/configuration/profiles/) in
 `rebar.config`, each pointing to a different `overaly_vars` file:
 
 ``` erlang
