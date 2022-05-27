@@ -390,14 +390,14 @@ terminate(_Reason, _State) ->
 
 %% internal
 
-%% same as lager:info but prepends the partition
+%% same as logger:info but prepends the partition
 log(String, State) ->
   log(String, [], State).
 
 log(String, Args, #{partition := Partition}) ->
   String2 = "[~.36B] " ++ String,
   Args2 = [Partition | Args],
-  lager:info(String2, Args2),
+  logger:info(String2, Args2),
   ok.
 ```
 
