@@ -108,18 +108,14 @@ A distributed batch job handling system could also use consistent hashing and ro
 
 ### About this tutorial
 
-Basho, the company that originally developed Riak and Riak Core was
-put into receivership in 2017. This introduces some uncertainty about the
-future of these products, although the community has shown interest in
-taking over their maintenance. At the moment of writing,
-the [riak_core_ng](https://github.com/Kyorai/riak_core) fork is
-the most actively maintained fork of Riak Core and hopefully the work being
-done there will eventually be merged back to the canonical repository.
+We're using Bashos' Riak Core for this tutorial,
+you can check it here [riak_core](https://github.com/basho/riak_core),
+as it seems to be maintained at the time of writing this.
 
 As part of our interest in this technology and our intention to use it
 in new projects we had to struggle a bit with scarce and outdated
 documenatation, stale dependencies, etc. The intention is thus to
-provide a tutorial on how to use Riak Core today, on an Erlang 21
+provide a tutorial on how to use Riak Core today, on an Erlang 25
 and rebar3 project, with minimal dependencies and operational
 sugar. You'll notice the structure borrows heavily from
 the
@@ -229,6 +225,7 @@ for its internal configuration:
    [kernel,
     stdlib,
     lager,
+    compiler,
     cuttlefish,
     riak_core
    ]}
@@ -246,7 +243,7 @@ development in `rebar.config`:
         {extended_start_script, false}]}.
 ```
 
-Note we won't be using the rebar3 shell command, which doesn't play
+Note we won't be using the `rebar3 shell` command, which doesn't play
 along nicely with riak_core; we need a proper release instead (although we can
 use dev_mode). Thus, we can build and run the release with:
 
