@@ -212,21 +212,16 @@ Next up we'll fill up some of the rebar.config file. We'll add the
 riak_core dependency and lager, which we'll use for logging:
 
 ``` erlang
-{erl_opts, [debug_info, {parse_transform, lager_transform}]}.
-{deps, [{riak_core, "3.1.0", {pkg, riak_core_ng}}, {lager, "3.5.1"}]}.
+{erl_opts, [debug_info]}.
+{deps, [{riak_core, {git, "https://github.com/basho/riak_core", {branch, "develop"}}}]}.
 ```
 
-Note that we're using the
-[`riak_core_ng` fork](https://hex.pm/packages/riak_core_ng), which is
-more up to date. Version 3.1.0 introduced support for Erlang 20 and 21 (previously
-some work was required to avoid deprecation
-[warnings_as_errors](http://erlang.org/doc/man/compile.html)). At this point you
-should be able to compile your project running `rebar3 compile`.
+At this point you should be able to compile your project running `rebar3 compile`.
 
 Now that the project compiles, let's try to build and run a
 release. First we need to add lager and riak_core to
 `src/rc_example.app.src`, so they're started along with our
-application. We also need to add cuttlefish, which is a system riak uses
+application. We also need to add compiler and cuttlefish, which is a system riak uses
 for its internal configuration:
 
 ``` erlang
