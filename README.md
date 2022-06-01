@@ -983,7 +983,7 @@ required riak_core application environment:
 
 ``` erlang
 start_node(NodeName, WebPort, HandoffPort) ->
-  %% need to set the code path so the same modules are available in the slave
+  %% need to set the code path so the same modules are available in the peer
   CodePath = code:get_path(),
   PathFlag = "-pa " ++ lists:concat(lists:join(" ", CodePath)),
   {ok, _} = ct_slave:start(NodeName, [{erl_flags, PathFlag}]),
