@@ -969,6 +969,9 @@ This module is being deprecated since OTP 25, and will be
 removed in OTP 27, in its place, you can use the peer module,
 for which we wrote a section for below. So, if you're
 using OTP25 or above, skip this section and if not, keep reading.
+If you want to know more about this, check out 
+[this thread](https://erlangforums.com/t/how-do-i-replace-ct-slave-start-with-ct-peer-or-the-peer-module/1494)
+from the Erlang Forums.
 
 Let's look at the implementation of the different helpers we used in the
 previous section. We need the `start_node` helper to
@@ -1076,6 +1079,7 @@ end_per_suite as:
 ```erlang
 end_per_suite(_) -> ok.
 ```
+### Node Communication
 Once the node is up, we can start running functions on it with
 [`rpc:call`](http://erlang.org/doc/man/rpc.html#call-4). In order for
 riak_core to work, we need to load the
