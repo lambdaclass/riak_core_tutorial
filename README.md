@@ -1186,8 +1186,7 @@ init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
             request => Request,
             accum => []},
 
-  {Request, allup, 1, 1, rc_example, rc_example_vnode_master, Timeout,
-   riak_core_coverage_plan, State}.
+  {Request, allup, 1, 1, rc_example, rc_example_vnode_master, Timeout, State}.
 ```
 
 In `init`, we initialize the process state as usual. We create a state
@@ -1198,7 +1197,7 @@ that we will update with the results coming from each vnode.
 `init` returns a big tuple with a bunch of parameters that control how
 the coverage command should work. Let's briefly explain each of
 them (mostly taken from
-[here](https://github.com/Kyorai/riak_core/blob/3.0.9/src/riak_core_coverage_fsm.erl#L45-L63);
+[here](https://github.com/basho/riak_core/blob/762ec81ae9af9a278e853f1feca418b9dcf748a3/src/riak_core_coverage_fsm.erl#L45-L63);
 you'll have to dig around for more details):
 
 * Request: an opaque data structure representing the command to be
@@ -1216,15 +1215,8 @@ you'll have to dig around for more details):
   at application startup.
 * VNodeMaster: The atom to use to reach the vnode master module (`rc_example_vnode_master`).
 * Timeout: timeout of the coverage request.
-* PlannerMod: a module that defines a `create_plan` function, which is
-  used to define how the cluster vnodes should be covered by the
-  command. This will usually be `riak_core_coverage_plan`.
 * State: the initial state for the module.
 
-Note that the PlannerMod argument was [introduced in the `riak_core_ng`
-fork](https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f) and
-isn't present in the original basho codebase (thus, if you
-are using an older riak_core version you should omit that parameter).
 
 ``` erlang
 process_results({{_ReqId, {_Partition, _Node}}, []}, State ) ->
