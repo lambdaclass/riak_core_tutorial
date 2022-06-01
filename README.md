@@ -964,6 +964,11 @@ There's nothing special about these tests when we abstract away the
 details of setting up the nodes and the riak_core cluster.
 
 #### ct_slave magic
+##### Note for OTP 25:
+This module is being deprecated since OTP 25, and will be
+removed in OTP 27, in its place, you can use the peer module,
+for which we wrote a section for below. So, if you're
+using OTP25 or above, skip this section and if not, keep reading.
 
 Let's look at the implementation of the different helpers we used in the
 previous section. We need the `start_node` helper to
@@ -1010,6 +1015,67 @@ it to Erlang with the `-pa` flag. There is probably
 a more succint way to do this, for example using `code:set_path`, but
 I couldn't make it work.
 
+#### Start Node implementation using Peer.
+First, change the `init_per_suite` function like this:
+
+```erlang
+init_per_suite(Config) ->
+    Host = "127.0.0.1",
+    Node1 = start_node('node1', Host, 8198, 8199),
+    Node2 = start_node('node2', Host, 8298, 8299),
+    Node3 = start_node('node3', Host, 8398, 8399),
+
+    build_cluster(Node1, Node2, Node3),
+
+    [{node1, Node1},
+     {node2, Node2},
+     {node3, Node3} | Config].
+
+```
+
+The change of arguments being passed to start_node
+is because we will be using the `?CT_PEER` macro, which receives a map
+like in [here](https://www.erlang.org/doc/man/peer.html#type-start_options), and
+behaves like if we were using `peer:start`, but adapted to Common Tests.
+
+Then, you should change `start_node` to this:
+```erlang
+start_node(Name, Host, WebPort, HandoffPort) ->
+    %% Need to set the code path so the same modules are available in the slave
+    CodePath = code:get_path(),
+    %% Arguments to set up the node
+    NodeArgs = #{name => Name, host => Host, args => ["-pa" | CodePath]},
+    %% Since OTP 25, ct_slaves nodes are deprecated
+    %% (and to be removed in OTP 27), so we're
+    %% using peer nodes instead, with the CT_PEER macro.
+    {ok, Peer, Node} = ?CT_PEER(NodeArgs),
+    unlink(Peer),
+    DataDir = "./data/" ++ atom_to_list(Name),
+
+    %% set the required environment for riak core
+    ok = rpc:call(Node, application, load, [riak_core]),
+    ok = rpc:call(Node, application, set_env, [riak_core, ring_state_dir, DataDir]),
+    ok = rpc:call(Node, application, set_env, [riak_core, platform_data_dir, DataDir]),
+    ok = rpc:call(Node, application, set_env, [riak_core, web_port, WebPort]),
+    ok = rpc:call(Node, application, set_env, [riak_core, handoff_port, HandoffPort]),
+    ok = rpc:call(Node, application, set_env, [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
+
+    %% start the rc_example app
+    {ok, _} = rpc:call(Node, application, ensure_all_started, [rc_example]),
+
+    Node.
+```
+One important thing to note is that we unlink the peer. This is due to
+`start_node` being executed with a process that dies before the test
+actually runs. 
+
+A convenient thing about the `?CT_PEER` macro is that it kills the 
+Node when the test ends, so we don't need to manually kill the nodes
+anymore. So, go ahead and delete the `stop_node` function and redefine
+end_per_suite as: 
+```erlang
+end_per_suite(_) -> ok.
+```
 Once the node is up, we can start running functions on it with
 [`rpc:call`](http://erlang.org/doc/man/rpc.html#call-4). In order for
 riak_core to work, we need to load the
