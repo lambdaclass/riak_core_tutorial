@@ -1179,7 +1179,7 @@ parameters are more or less forwarded to
 
 ``` erlang
 init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
-  lager:info("Starting coverage request ~p ~p", [ReqId, Request]),
+  logger:info("Starting coverage request ~p ~p", [ReqId, Request]),
 
   State = #{req_id => ReqId,
             from => ClientPid,
@@ -1239,14 +1239,14 @@ that leaves the accumulator unchanged.
 
 ``` erlang
 finish(clean, State = #{req_id := ReqId, from := From, accum := Accum}) ->
-  lager:info("Finished coverage request ~p", [ReqId]),
+  logger:info("Finished coverage request ~p", [ReqId]),
 
   %% send the result back to the caller
   From ! {ReqId, {ok, Accum}},
   {stop, normal, State};
 
 finish({error, Reason}, State = #{req_id := ReqId, from := From, accum := Accum}) ->
-  lager:warning("Coverage query failed! Reason: ~p", [Reason]),
+  logger:warning("Coverage query failed! Reason: ~p", [Reason]),
   From ! {ReqId, {partial, Reason, Accum}},
   {stop, normal, State}.
 ```
