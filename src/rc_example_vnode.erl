@@ -46,7 +46,7 @@ handle_command({delete, Key}, _Sender, State = #{data := Data}) ->
   {reply, maps:get(Key, Data, not_found), State#{data => NewData}};
 
 handle_command(Message, _Sender, State) ->
-  lager:warning("unhandled_commanod ~p", [Message]),
+  logger:warning("unhandled_commanod ~p", [Message]),
   {noreply, State}.
 
 %% handle_handoff_command will be called when commands come in during
@@ -132,9 +132,9 @@ terminate(_Reason, _State) ->
 log(String, State) ->
   log(String, [], State).
 
-%% same as lager:info but prepends the partition
+%% same as logger:info but prepends the partition
 log(String, Args, #{partition := Partition}) ->
   String2 = "[~.36B] " ++ String,
   Args2 = [Partition | Args],
-  lager:info(String2, Args2),
+  logger:info(String2, Args2),
   ok.

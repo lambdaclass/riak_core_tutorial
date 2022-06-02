@@ -2,18 +2,17 @@
  [{description, "An OTP application"},
   {vsn, "0.1.0"},
   {registered, []},
-  {mod, { rc_example_app, []}},
+  {mod, {rc_example_app, []}},
   {applications,
    [kernel,
     stdlib,
-    lager,
+    compiler,
     cuttlefish,
     riak_core
    ]},
   {env,[]},
   {modules, []},
 
-  {maintainers, []},
   {licenses, ["Apache 2.0"]},
   {links, []}
  ]}.

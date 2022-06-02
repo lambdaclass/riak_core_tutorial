@@ -13,7 +13,7 @@ start_link(ReqId, ClientPid, Request, Timeout) ->
 %% riak_core_coverage_fsm API
 
 init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
-  lager:info("Starting coverage request ~p ~p", [ReqId, Request]),
+  logger:info("Starting coverage request ~p ~p", [ReqId, Request]),
 
   State = #{req_id => ReqId,
             from => ClientPid,
@@ -29,9 +29,6 @@ init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
    rc_example, %% service to use to check for available nodes
    rc_example_vnode_master, %% The atom to use to reach the vnode master module
    Timeout,
-   %% coverage plan was added in the _ng fork
-   %% https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f
-   riak_core_coverage_plan, %%  The module which defines create_plan
    State}.
 
 process_results({{_ReqId, {_Partition, _Node}}, []}, State ) ->
@@ -43,13 +40,13 @@ process_results({{_ReqId, {Partition, Node}}, Data},
   {done, State#{accum => NewAccum}}.
 
 finish(clean, State = #{req_id := ReqId, from := From, accum := Accum}) ->
-  lager:info("Finished coverage request ~p", [ReqId]),
+  logger:info("Finished coverage request ~p", [ReqId]),
 
   %% send the result back to the caller
   From ! {ReqId, {ok, Accum}},
   {stop, normal, State};
 
 finish({error, Reason}, State = #{req_id := ReqId, from := From, accum := Accum}) ->
-  lager:warning("Coverage query failed! Reason: ~p", [Reason]),
+  logger:warning("Coverage query failed! Reason: ~p", [Reason]),
   From ! {ReqId, {partial, Reason, Accum}},
   {stop, normal, State}.
