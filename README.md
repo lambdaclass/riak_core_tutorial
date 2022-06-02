@@ -108,18 +108,14 @@ A distributed batch job handling system could also use consistent hashing and ro
 
 ### About this tutorial
 
-Basho, the company that originally developed Riak and Riak Core was
-put into receivership in 2017. This introduces some uncertainty about the
-future of these products, although the community has shown interest in
-taking over their maintenance. At the moment of writing,
-the [riak_core_ng](https://github.com/Kyorai/riak_core) fork is
-the most actively maintained fork of Riak Core and hopefully the work being
-done there will eventually be merged back to the canonical repository.
+We're using Basho's Riak Core for this tutorial,
+you can check it here [riak_core](https://github.com/basho/riak_core),
+as it seems to be maintained at the time of writing this.
 
 As part of our interest in this technology and our intention to use it
 in new projects we had to struggle a bit with scarce and outdated
 documenatation, stale dependencies, etc. The intention is thus to
-provide a tutorial on how to use Riak Core today, on an Erlang 21
+provide a tutorial on how to use Riak Core today, on an Erlang 25
 and rebar3 project, with minimal dependencies and operational
 sugar. You'll notice the structure borrows heavily from
 the
@@ -212,21 +208,16 @@ Next up we'll fill up some of the rebar.config file. We'll add the
 riak_core dependency and lager, which we'll use for logging:
 
 ``` erlang
-{erl_opts, [debug_info, {parse_transform, lager_transform}]}.
-{deps, [{riak_core, "3.1.0", {pkg, riak_core_ng}}, {lager, "3.5.1"}]}.
+{erl_opts, [debug_info]}.
+{deps, [{riak_core, {git, "https://github.com/basho/riak_core", {branch, "develop"}}}]}.
 ```
 
-Note that we're using the
-[`riak_core_ng` fork](https://hex.pm/packages/riak_core_ng), which is
-more up to date. Version 3.1.0 introduced support for Erlang 20 and 21 (previously
-some work was required to avoid deprecation
-[warnings_as_errors](http://erlang.org/doc/man/compile.html)). At this point you
-should be able to compile your project running `rebar3 compile`.
+At this point you should be able to compile your project running `rebar3 compile`.
 
 Now that the project compiles, let's try to build and run a
 release. First we need to add lager and riak_core to
 `src/rc_example.app.src`, so they're started along with our
-application. We also need to add cuttlefish, which is a system riak uses
+application. We also need to add compiler and cuttlefish, which is a system riak uses
 for its internal configuration:
 
 ``` erlang
@@ -234,6 +225,7 @@ for its internal configuration:
    [kernel,
     stdlib,
     lager,
+    compiler,
     cuttlefish,
     riak_core
    ]}
@@ -251,7 +243,7 @@ development in `rebar.config`:
         {extended_start_script, false}]}.
 ```
 
-Note we won't be using the rebar3 shell command, which doesn't play
+Note we won't be using the `rebar3 shell` command, which doesn't play
 along nicely with riak_core; we need a proper release instead (although we can
 use dev_mode). Thus, we can build and run the release with:
 
@@ -398,14 +390,14 @@ terminate(_Reason, _State) ->
 
 %% internal
 
-%% same as lager:info but prepends the partition
+%% same as logger:info but prepends the partition
 log(String, State) ->
   log(String, [], State).
 
 log(String, Args, #{partition := Partition}) ->
   String2 = "[~.36B] " ++ String,
   Args2 = [Partition | Args],
-  lager:info(String2, Args2),
+  logger:info(String2, Args2),
   ok.
 ```
 
@@ -533,7 +525,7 @@ response. There are other functions to send commands to a vnode:
 is like `sync_spawn_command` but blocks the vnode_master process).
 
 You can find more details of the functions used in this
-section [here](http://efcasado.github.io/riak-core_intro/). To wrap up
+section [here](http://efcasado.github.io/riak-core_intro). To wrap up
 let's run our `ping` function from the shell:
 
 ``` erlang
@@ -566,20 +558,22 @@ riak_core in each node (the `web_port` and `handoff_port` tuples in `conf/sys.co
 Since we'll have an almost identical configuration in all of the nodes,
 we'll use the overalys feature that rebar3 inherits from relx. You can
 read about
-it [here](https://www.rebar3.org/docs/releases#section-overlays),
+it [here](https://www.rebar3.org/docs/deployment/releases/#overlays-build-time-configuration),
 although it's not strictly necessary for the
 purposes of this tutorial. First we tell rebar3 that `conf/sys.config`
 and `conf/vm.args` should be treated as templates by adding an
 `overlay` tuple in the `relx` configuration:
-
 ``` erlang
-{overlay, [{template, "conf/sys.config", "releases/{{default_release_version}}/sys.config"},
-           {template, "conf/vm.args", "releases/{{default_release_version}}/vm.args"}]}
+{overlay, [{template, "conf/sys.config", "releases/{{release_version}}/sys.config"},
+           {template, "conf/vm.args", "releases/{{release_version}}/vm.args"}]}
 ```
+
+If you're having problems with the templates, check your rebar3 version 
+and [this github issue](https://github.com/erlang/rebar3/issues/2710).
 
 The template variables' values will be taken from `overlay_vars` files. We will
 define three
-different [rebar profiles](https://www.rebar3.org/docs/profiles) in
+different [rebar profiles](https://www.rebar3.org/docs/configuration/profiles/) in
 `rebar.config`, each pointing to a different `overaly_vars` file:
 
 ``` erlang
@@ -970,6 +964,14 @@ There's nothing special about these tests when we abstract away the
 details of setting up the nodes and the riak_core cluster.
 
 #### ct_slave magic
+##### Note for OTP 25:
+This module is being deprecated since OTP 25, and will be
+removed in OTP 27, in its place, you can use the peer module,
+for which we wrote a section for below. So, if you're
+using OTP25 or above, skip this section and if not, keep reading.
+If you want to know more about this, check out 
+[this thread](https://erlangforums.com/t/how-do-i-replace-ct-slave-start-with-ct-peer-or-the-peer-module/1494)
+from the Erlang Forums.
 
 Let's look at the implementation of the different helpers we used in the
 previous section. We need the `start_node` helper to
@@ -981,7 +983,7 @@ required riak_core application environment:
 
 ``` erlang
 start_node(NodeName, WebPort, HandoffPort) ->
-  %% need to set the code path so the same modules are available in the slave
+  %% need to set the code path so the same modules are available in the peer
   CodePath = code:get_path(),
   PathFlag = "-pa " ++ lists:concat(lists:join(" ", CodePath)),
   {ok, _} = ct_slave:start(NodeName, [{erl_flags, PathFlag}]),
@@ -1016,6 +1018,68 @@ it to Erlang with the `-pa` flag. There is probably
 a more succint way to do this, for example using `code:set_path`, but
 I couldn't make it work.
 
+#### Start Node implementation using Peer.
+First, change the `init_per_suite` function like this:
+
+```erlang
+init_per_suite(Config) ->
+    Host = "127.0.0.1",
+    Node1 = start_node('node1', Host, 8198, 8199),
+    Node2 = start_node('node2', Host, 8298, 8299),
+    Node3 = start_node('node3', Host, 8398, 8399),
+
+    build_cluster(Node1, Node2, Node3),
+
+    [{node1, Node1},
+     {node2, Node2},
+     {node3, Node3} | Config].
+
+```
+
+The change of arguments being passed to start_node
+is because we will be using the `?CT_PEER` macro, which receives a map
+like in [here](https://www.erlang.org/doc/man/peer.html#type-start_options), and
+behaves like if we were using `peer:start`, but adapted to Common Tests.
+
+Then, you should change `start_node` to this:
+```erlang
+start_node(Name, Host, WebPort, HandoffPort) ->
+    %% Need to set the code path so the same modules are available in the slave
+    CodePath = code:get_path(),
+    %% Arguments to set up the node
+    NodeArgs = #{name => Name, host => Host, args => ["-pa" | CodePath]},
+    %% Since OTP 25, ct_slaves nodes are deprecated
+    %% (and to be removed in OTP 27), so we're
+    %% using peer nodes instead, with the CT_PEER macro.
+    {ok, Peer, Node} = ?CT_PEER(NodeArgs),
+    unlink(Peer),
+    DataDir = "./data/" ++ atom_to_list(Name),
+
+    %% set the required environment for riak core
+    ok = rpc:call(Node, application, load, [riak_core]),
+    ok = rpc:call(Node, application, set_env, [riak_core, ring_state_dir, DataDir]),
+    ok = rpc:call(Node, application, set_env, [riak_core, platform_data_dir, DataDir]),
+    ok = rpc:call(Node, application, set_env, [riak_core, web_port, WebPort]),
+    ok = rpc:call(Node, application, set_env, [riak_core, handoff_port, HandoffPort]),
+    ok = rpc:call(Node, application, set_env, [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
+
+    %% start the rc_example app
+    {ok, _} = rpc:call(Node, application, ensure_all_started, [rc_example]),
+
+    Node.
+```
+One important thing to note is that we unlink the peer. This is due to
+`start_node` being executed with a process that dies before the test
+actually runs. 
+
+A convenient thing about the `?CT_PEER` macro is that it kills the 
+Node when the test ends, so we don't need to manually kill the nodes
+anymore. So, go ahead and delete the `stop_node` function and redefine
+end_per_suite as: 
+```erlang
+end_per_suite(_) -> ok.
+```
+### Node Communication
 Once the node is up, we can start running functions on it with
 [`rpc:call`](http://erlang.org/doc/man/rpc.html#call-4). In order for
 riak_core to work, we need to load the
@@ -1115,15 +1179,14 @@ parameters are more or less forwarded to
 
 ``` erlang
 init({pid, ReqId, ClientPid}, [Request, Timeout]) ->
-  lager:info("Starting coverage request ~p ~p", [ReqId, Request]),
+  logger:info("Starting coverage request ~p ~p", [ReqId, Request]),
 
   State = #{req_id => ReqId,
             from => ClientPid,
             request => Request,
             accum => []},
 
-  {Request, allup, 1, 1, rc_example, rc_example_vnode_master, Timeout,
-   riak_core_coverage_plan, State}.
+  {Request, allup, 1, 1, rc_example, rc_example_vnode_master, Timeout, State}.
 ```
 
 In `init`, we initialize the process state as usual. We create a state
@@ -1134,7 +1197,7 @@ that we will update with the results coming from each vnode.
 `init` returns a big tuple with a bunch of parameters that control how
 the coverage command should work. Let's briefly explain each of
 them (mostly taken from
-[here](https://github.com/Kyorai/riak_core/blob/3.0.9/src/riak_core_coverage_fsm.erl#L45-L63);
+[here](https://github.com/basho/riak_core/blob/762ec81ae9af9a278e853f1feca418b9dcf748a3/src/riak_core_coverage_fsm.erl#L45-L63);
 you'll have to dig around for more details):
 
 * Request: an opaque data structure representing the command to be
@@ -1152,15 +1215,8 @@ you'll have to dig around for more details):
   at application startup.
 * VNodeMaster: The atom to use to reach the vnode master module (`rc_example_vnode_master`).
 * Timeout: timeout of the coverage request.
-* PlannerMod: a module that defines a `create_plan` function, which is
-  used to define how the cluster vnodes should be covered by the
-  command. This will usually be `riak_core_coverage_plan`.
 * State: the initial state for the module.
 
-Note that the PlannerMod argument was [introduced in the `riak_core_ng`
-fork](https://github.com/Kyorai/riak_core/commit/3826e3335ab3fe0008b418c4ece17845bcf1d4dc#diff-638fdfff08e818d2858d8b9d8d290c5f) and
-isn't present in the original basho codebase (thus, if you
-are using an older riak_core version you should omit that parameter).
 
 ``` erlang
 process_results({{_ReqId, {_Partition, _Node}}, []}, State ) ->
@@ -1183,14 +1239,14 @@ that leaves the accumulator unchanged.
 
 ``` erlang
 finish(clean, State = #{req_id := ReqId, from := From, accum := Accum}) ->
-  lager:info("Finished coverage request ~p", [ReqId]),
+  logger:info("Finished coverage request ~p", [ReqId]),
 
   %% send the result back to the caller
   From ! {ReqId, {ok, Accum}},
   {stop, normal, State};
 
 finish({error, Reason}, State = #{req_id := ReqId, from := From, accum := Accum}) ->
-  lager:warning("Coverage query failed! Reason: ~p", [Reason]),
+  logger:warning("Coverage query failed! Reason: ~p", [Reason]),
   From ! {ReqId, {partial, Reason, Accum}},
   {stop, normal, State}.
 ```
