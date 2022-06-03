@@ -6,4 +6,4 @@ jobs:
     name: Rebar3 formatting check
     steps:
       - uses: actions/checkout@v2
-      - run: ../rebar3 --verify
+      - run: ./rebar3 --verify
