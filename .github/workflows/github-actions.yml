@@ -6,4 +6,8 @@ jobs:
     name: Rebar3 formatting check
     steps:
       - uses: actions/checkout@v2
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '25'
+      - run: ./rebar3 compile
       - run: ./rebar3 format --verify
