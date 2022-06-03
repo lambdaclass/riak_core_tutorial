@@ -1,0 +1,9 @@
+name: tutorial-tests
+on: [push]
+jobs:
+  check-formatting:
+    runs-on: ubuntu-latest
+    name: Rebar3 formatting check
+    steps:
+      - uses: actions/checkout@v2
+      - run: ../../rebar3 --verify
