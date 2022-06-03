@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{matrix.latest}}
+          otp-version: ${{matrix.version}}
       - run: ./rebar3 ct --name test@127.0.0.1
   test-old-otp-versions:
     runs-on: ubuntu-latest
