@@ -22,4 +22,5 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.version}}
-      - run: make test
+          rebar3-version: ${{matrix.rebar3}}
+      - run: rebar3 ct --name test@127.0.0.1
