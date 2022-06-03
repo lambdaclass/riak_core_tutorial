@@ -11,7 +11,7 @@ jobs:
           otp-version: '25'
       - run: ./rebar3 compile
       - run: ./rebar3 format --verify
-  test-latest-otp-version:
+  test-otp-versions:
     runs-on: ubuntu-latest
     name: OTP Versions Testing
     strategy:
@@ -23,17 +23,3 @@ jobs:
         with:
           otp-version: ${{matrix.version}}
       - run: ./rebar3 ct --name test@127.0.0.1
-  test-old-otp-versions:
-    runs-on: ubuntu-latest
-    name: OTP Versions Testing
-    strategy:
-      matrix:
-        version: ['22', '21']
-        rebar-version: ['3.11.0', '3.10.0']
-    steps:
-      - uses: actions/checkout@v2
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{matrix.version}}
-          rebar-version:  ${{matrix.rebar-version}}
-      - run: rebar3 ct --name test@127.0.0.1
