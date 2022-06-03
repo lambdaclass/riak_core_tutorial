@@ -28,7 +28,7 @@ jobs:
     name: OTP Versions Testing
     strategy:
       matrix:
-        version: ['22']
+        version: ['22', '21']
     steps:
       - uses: actions/checkout@v2
       - uses: erlef/setup-beam@v1
