@@ -16,11 +16,11 @@ jobs:
     name: OTP Versions Testing
     strategy:
       matrix:
-        version: [19, 20, 21, 22, 23, 24, 25]
+        version: [22, 23, 24, 25]
     steps:
       - uses: actions/checkout@v2
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.version}}
           rebar3-version: ${{matrix.rebar3}}
-      - run: rebar3 ct --name test@127.0.0.1
+      - run: ./rebar3 ct --name test@127.0.0.1
