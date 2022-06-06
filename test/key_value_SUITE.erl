@@ -164,7 +164,6 @@ coverage_test(Config) ->
 
 %%% internal
 
-
 start_node(NodeName, WebPort, HandoffPort) ->
     %% need to set the code path so the same modules are available in the slave
     CodePath = code:get_path(),
