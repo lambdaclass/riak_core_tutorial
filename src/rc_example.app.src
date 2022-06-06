@@ -1,18 +1,11 @@
-{application, rc_example,
+{application,
+ rc_example,
  [{description, "An OTP application"},
   {vsn, "0.1.0"},
   {registered, []},
   {mod, {rc_example_app, []}},
-  {applications,
-   [kernel,
-    stdlib,
-    compiler,
-    cuttlefish,
-    riak_core
-   ]},
-  {env,[]},
+  {applications, [kernel, stdlib, compiler, cuttlefish, riak_core]},
+  {env, []},
   {modules, []},
-
   {licenses, ["Apache 2.0"]},
-  {links, []}
- ]}.
+  {links, []}]}.
