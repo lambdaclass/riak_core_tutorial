@@ -7,6 +7,8 @@
 all() ->
     [ping_test, key_value_test, coverage_test].
 
+%% This is needed because the ct_slave is being deprecated in OTP 25,
+%% and will be removed in OTP 27. Its replacement is the peer module.
 -if(?OTP_RELEASE >= 25).
 
 init_per_suite(Config) ->
@@ -19,9 +21,44 @@ init_per_suite(Config) ->
 
     [{node1, Node1}, {node2, Node2}, {node3, Node3} | Config].
 
+start_node(Name, Host, WebPort, HandoffPort) ->
+    %% Need to set the code path so the same modules are available in the slave
+    CodePath = code:get_path(),
+    %% Arguments to set up the node
+    NodeArgs =
+        #{name => Name,
+          host => Host,
+          args => ["-pa" | CodePath]},
+    %% Since OTP 25, ct_slaves nodes are deprecated
+    %% (and to be removed in OTP 27), so we're
+    %% using peer nodes instead, with the CT_PEER macro,
+    %% which starts a peer node following Common Tests'
+    %% conventions.
+    {ok, Peer, Node} = ?CT_PEER(NodeArgs),
+    unlink(Peer),
+    DataDir = "./data/" ++ atom_to_list(Name),
+
+    %% set the required environment for riak core
+    ok = rpc:call(Node, application, load, [riak_core]),
+    ok = rpc:call(Node, application, set_env, [riak_core, ring_state_dir, DataDir]),
+    ok = rpc:call(Node, application, set_env, [riak_core, platform_data_dir, DataDir]),
+    ok = rpc:call(Node, application, set_env, [riak_core, web_port, WebPort]),
+    ok = rpc:call(Node, application, set_env, [riak_core, handoff_port, HandoffPort]),
+    ok =
+        rpc:call(Node,
+                 application,
+                 set_env,
+                 [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
+
+    %% start the rc_example app
+    {ok, _} = rpc:call(Node, application, ensure_all_started, [rc_example]),
+
+    Node.
+
 end_per_suite(_) ->
     ok.
 
+%% OTP 24 and 23 Code
 -else.
 
 init_per_suite(Config) ->
@@ -126,41 +163,7 @@ coverage_test(Config) ->
     ok.
 
 %%% internal
--if(?OTP_RELEASE >= 25).
 
-start_node(Name, Host, WebPort, HandoffPort) ->
-    %% Need to set the code path so the same modules are available in the slave
-    CodePath = code:get_path(),
-    %% Arguments to set up the node
-    NodeArgs =
-        #{name => Name,
-          host => Host,
-          args => ["-pa" | CodePath]},
-    %% Since OTP 25, ct_slaves nodes are deprecated
-    %% (and to be removed in OTP 27), so we're
-    %% using peer nodes instead, with the CT_PEER macro.
-    {ok, Peer, Node} = ?CT_PEER(NodeArgs),
-    unlink(Peer),
-    DataDir = "./data/" ++ atom_to_list(Name),
-
-    %% set the required environment for riak core
-    ok = rpc:call(Node, application, load, [riak_core]),
-    ok = rpc:call(Node, application, set_env, [riak_core, ring_state_dir, DataDir]),
-    ok = rpc:call(Node, application, set_env, [riak_core, platform_data_dir, DataDir]),
-    ok = rpc:call(Node, application, set_env, [riak_core, web_port, WebPort]),
-    ok = rpc:call(Node, application, set_env, [riak_core, handoff_port, HandoffPort]),
-    ok =
-        rpc:call(Node,
-                 application,
-                 set_env,
-                 [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
-
-    %% start the rc_example app
-    {ok, _} = rpc:call(Node, application, ensure_all_started, [rc_example]),
-
-    Node.
-
--else.
 
 start_node(NodeName, WebPort, HandoffPort) ->
     %% need to set the code path so the same modules are available in the slave
@@ -190,8 +193,6 @@ start_node(NodeName, WebPort, HandoffPort) ->
 
 stop_node(NodeName) ->
     ct_slave:stop(NodeName).
-
--endif.
 
 build_cluster(Node1, Node2, Node3) ->
     rpc:call(Node2, riak_core, join, [Node1]),
