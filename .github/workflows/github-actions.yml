@@ -1,0 +1,25 @@
+name: tutorial-tests
+on: [push]
+jobs:
+  check-formatting:
+    runs-on: ubuntu-latest
+    name: Rebar3 formatting check
+    steps:
+      - uses: actions/checkout@v2
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '25'
+      - run: ./rebar3 compile
+      - run: ./rebar3 format --verify
+  test-otp-versions:
+    runs-on: ubuntu-latest
+    name: OTP Versions Testing
+    strategy:
+      matrix:
+        version: ['23', '24', '25']
+    steps:
+      - uses: actions/checkout@v2
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.version}}
+      - run: make test

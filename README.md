@@ -1,8 +1,8 @@
 # Riak Core Tutorial [![Build Status](https://travis-ci.org/lambdaclass/riak_core_tutorial.svg?branch=master)](https://travis-ci.org/lambdaclass/riak_core_tutorial)
 
 This repository contains an example riak_core application using the most
-recent version of the [riak_core_ng fork](https://hex.pm/packages/riak_core_ng)
-and running on Erlang/OTP 21 with rebar3.
+recent version of [riak_core](https://hex.pm/packages/riak_core)
+and running on Erlang/OTP 25 with rebar3.
 
 Below is a detailed [tutorial](/#riak-core-tutorial) that explains the step-by-step process to
 produce the same code base from scratch.
@@ -634,18 +634,19 @@ Let's add a Makefile to easily run any of the nodes:
 .PHONY: dev1 dev2 dev3 clean_data
 
 dev1:
-	rebar3 as dev1 release && _build/dev1/rel/rc_example/bin/rc_example
+	./rebar3 as dev1 release && _build/dev1/rel/rc_example/bin/rc_example
 
 dev2:
-	rebar3 as dev2 release && _build/dev2/rel/rc_example/bin/rc_example
+	./rebar3 as dev2 release && _build/dev2/rel/rc_example/bin/rc_example
 
 dev3:
-	rebar3 as dev3 release && _build/dev3/rel/rc_example/bin/rc_example
+	./rebar3 as dev3 release && _build/dev3/rel/rc_example/bin/rc_example
 
 clean_data:
 	rm -rf _build/dev1/rel/rc_example/data* ; rm -rf _build/dev2/rel/rc_example/data* ; rm -rf _build/dev3/rel/rc_example/data*
 ```
 
+Currently, the latest rebar3 release is not built with 
 We also include a `clean_data` target, for the cases when we want to start
 with a fresh cluster (riak_core persists cluster
 information between runs, so you may need to remove it when you make

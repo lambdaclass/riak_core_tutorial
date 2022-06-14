@@ -5,155 +5,213 @@
 -compile(export_all).
 
 all() ->
-  [ping_test,
-   key_value_test,
-   coverage_test].
+    [ping_test, key_value_test, coverage_test].
+
+%% This is needed because the ct_slave is being deprecated in OTP 25,
+%% and will be removed in OTP 27. Its replacement is the peer module.
+-if(?OTP_RELEASE >= 25).
 
 init_per_suite(Config) ->
-  Node1 = 'node1@127.0.0.1',
-  Node2 = 'node2@127.0.0.1',
-  Node3 = 'node3@127.0.0.1',
-  start_node(Node1, 8198, 8199),
-  start_node(Node2, 8298, 8299),
-  start_node(Node3, 8398, 8399),
+    Host = "127.0.0.1",
+    Node1 = start_node(node1, Host, 8198, 8199),
+    Node2 = start_node(node2, Host, 8298, 8299),
+    Node3 = start_node(node3, Host, 8398, 8399),
 
-  build_cluster(Node1, Node2, Node3),
+    build_cluster(Node1, Node2, Node3),
 
-  [{node1, Node1},
-   {node2, Node2},
-   {node3, Node3} | Config].
+    [{node1, Node1}, {node2, Node2}, {node3, Node3} | Config].
+
+start_node(Name, Host, WebPort, HandoffPort) ->
+    %% Need to set the code path so the same modules are available in the slave
+    CodePath = code:get_path(),
+    %% Arguments to set up the node
+    NodeArgs =
+        #{name => Name,
+          host => Host,
+          args => ["-pa" | CodePath]},
+    %% Since OTP 25, ct_slaves nodes are deprecated
+    %% (and to be removed in OTP 27), so we're
+    %% using peer nodes instead, with the CT_PEER macro,
+    %% which starts a peer node following Common Tests'
+    %% conventions.
+    {ok, Peer, Node} = ?CT_PEER(NodeArgs),
+    unlink(Peer),
+    DataDir = "./data/" ++ atom_to_list(Name),
+
+    %% set the required environment for riak core
+    ok = rpc:call(Node, application, load, [riak_core]),
+    ok = rpc:call(Node, application, set_env, [riak_core, ring_state_dir, DataDir]),
+    ok = rpc:call(Node, application, set_env, [riak_core, platform_data_dir, DataDir]),
+    ok = rpc:call(Node, application, set_env, [riak_core, web_port, WebPort]),
+    ok = rpc:call(Node, application, set_env, [riak_core, handoff_port, HandoffPort]),
+    ok =
+        rpc:call(Node,
+                 application,
+                 set_env,
+                 [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
+
+    %% start the rc_example app
+    {ok, _} = rpc:call(Node, application, ensure_all_started, [rc_example]),
+
+    Node.
+
+end_per_suite(_) ->
+    ok.
+
+%% OTP 24 and 23 Code
+-else.
+
+init_per_suite(Config) ->
+    Node1 = 'node1@127.0.0.1',
+    Node2 = 'node2@127.0.0.1',
+    Node3 = 'node3@127.0.0.1',
+    start_node(Node1, 8198, 8199),
+    start_node(Node2, 8298, 8299),
+    start_node(Node3, 8398, 8399),
+
+    build_cluster(Node1, Node2, Node3),
+
+    [{node1, Node1}, {node2, Node2}, {node3, Node3} | Config].
 
 end_per_suite(Config) ->
-  Node1 = ?config(node1, Config),
-  Node2 = ?config(node2, Config),
-  Node3 = ?config(node3, Config),
-  stop_node(Node1),
-  stop_node(Node2),
-  stop_node(Node3),
-  ok.
+    Node1 = ?config(node1, Config),
+    Node2 = ?config(node2, Config),
+    Node3 = ?config(node3, Config),
+    stop_node(Node1),
+    stop_node(Node2),
+    stop_node(Node3),
+    ok.
+
+-endif.
 
 ping_test(Config) ->
-  Node1 = ?config(node1, Config),
-  Node2 = ?config(node2, Config),
-  Node3 = ?config(node3, Config),
+    Node1 = ?config(node1, Config),
+    Node2 = ?config(node2, Config),
+    Node3 = ?config(node3, Config),
 
-  {pong, _Partition1} = rc_command(Node1, ping),
-  {pong, _Partition2} = rc_command(Node2, ping),
-  {pong, _Partition3} = rc_command(Node3, ping),
+    {pong, _Partition1} = rc_command(Node1, ping),
+    {pong, _Partition2} = rc_command(Node2, ping),
+    {pong, _Partition3} = rc_command(Node3, ping),
 
-  ok.
+    ok.
 
 key_value_test(Config) ->
-  Node1 = ?config(node1, Config),
-  Node2 = ?config(node2, Config),
-  Node3 = ?config(node3, Config),
+    Node1 = ?config(node1, Config),
+    Node2 = ?config(node2, Config),
+    Node3 = ?config(node3, Config),
 
-  ok = rc_command(Node1, put, [k1, v1]),
-  ok = rc_command(Node1, put, [k2, v2]),
-  ok = rc_command(Node1, put, [k3, v3]),
+    ok = rc_command(Node1, put, [k1, v1]),
+    ok = rc_command(Node1, put, [k2, v2]),
+    ok = rc_command(Node1, put, [k3, v3]),
 
-  %% get from any of the nodes
-  v1 = rc_command(Node1, get, [k1]),
-  v2 = rc_command(Node1, get, [k2]),
-  v3 = rc_command(Node1, get, [k3]),
-  not_found = rc_command(Node1, get, [k10]),
+    %% get from any of the nodes
+    v1 = rc_command(Node1, get, [k1]),
+    v2 = rc_command(Node1, get, [k2]),
+    v3 = rc_command(Node1, get, [k3]),
+    not_found = rc_command(Node1, get, [k10]),
 
-  v1 = rc_command(Node2, get, [k1]),
-  v2 = rc_command(Node2, get, [k2]),
-  v3 = rc_command(Node2, get, [k3]),
-  not_found = rc_command(Node2, get, [k10]),
+    v1 = rc_command(Node2, get, [k1]),
+    v2 = rc_command(Node2, get, [k2]),
+    v3 = rc_command(Node2, get, [k3]),
+    not_found = rc_command(Node2, get, [k10]),
 
-  v1 = rc_command(Node3, get, [k1]),
-  v2 = rc_command(Node3, get, [k2]),
-  v3 = rc_command(Node3, get, [k3]),
-  not_found = rc_command(Node3, get, [k10]),
+    v1 = rc_command(Node3, get, [k1]),
+    v2 = rc_command(Node3, get, [k2]),
+    v3 = rc_command(Node3, get, [k3]),
+    not_found = rc_command(Node3, get, [k10]),
 
-  %% test reset and delete
-  ok = rc_command(Node1, put, [k1, v_new]),
-  v_new = rc_command(Node1, get, [k1]),
+    %% test reset and delete
+    ok = rc_command(Node1, put, [k1, v_new]),
+    v_new = rc_command(Node1, get, [k1]),
 
-  v_new = rc_command(Node1, delete, [k1]),
-  not_found = rc_command(Node1, get, [k1]),
+    v_new = rc_command(Node1, delete, [k1]),
+    not_found = rc_command(Node1, get, [k1]),
 
-  ok = rc_command(Node1, put, [k1, v_new]),
-  v_new = rc_command(Node1, get, [k1]),
+    ok = rc_command(Node1, put, [k1, v_new]),
+    v_new = rc_command(Node1, get, [k1]),
 
-  ok.
+    ok.
 
 coverage_test(Config) ->
-  Node1 = ?config(node1, Config),
-  Node2 = ?config(node2, Config),
+    Node1 = ?config(node1, Config),
+    Node2 = ?config(node2, Config),
 
-  %% clear, should contain no keys and no values
-  ok = rc_command(Node1, clear),
-  [] = rc_coverage(Node1, keys),
-  [] = rc_coverage(Node1, values),
+    %% clear, should contain no keys and no values
+    ok = rc_command(Node1, clear),
+    [] = rc_coverage(Node1, keys),
+    [] = rc_coverage(Node1, values),
 
-  ToKey = fun (N) -> "key" ++ integer_to_list(N) end,
-  ToValue = fun (N) -> "value" ++ integer_to_list(N) end,
-  Range = lists:seq(1, 100),
-  lists:foreach(fun(N) ->
-                    ok = rc_command(Node1, put, [ToKey(N), ToValue(N)])
-                end, Range),
+    ToKey = fun(N) -> "key" ++ integer_to_list(N) end,
+    ToValue = fun(N) -> "value" ++ integer_to_list(N) end,
+    Range = lists:seq(1, 100),
+    lists:foreach(fun(N) -> ok = rc_command(Node1, put, [ToKey(N), ToValue(N)]) end, Range),
 
-  ActualKeys = rc_coverage(Node2, keys),
-  ActualValues = rc_coverage(Node2, values),
+    ActualKeys = rc_coverage(Node2, keys),
+    ActualValues = rc_coverage(Node2, values),
 
-  100 = length(ActualKeys),
-  100 = length(ActualValues),
+    100 = length(ActualKeys),
+    100 = length(ActualValues),
 
-  true = have_same_elements(ActualKeys, lists:map(ToKey, Range)),
-  true = have_same_elements(ActualValues, lists:map(ToValue, Range)),
+    true = have_same_elements(ActualKeys, lists:map(ToKey, Range)),
+    true = have_same_elements(ActualValues, lists:map(ToValue, Range)),
 
-  %% store should be empty after a new clear
-  ok = rc_command(Node1, clear),
-  [] = rc_coverage(Node1, keys),
-  [] = rc_coverage(Node1, values),
+    %% store should be empty after a new clear
+    ok = rc_command(Node1, clear),
+    [] = rc_coverage(Node1, keys),
+    [] = rc_coverage(Node1, values),
 
-  ok.
+    ok.
 
 %%% internal
+
 start_node(NodeName, WebPort, HandoffPort) ->
-  %% need to set the code path so the same modules are available in the slave
-  CodePath = code:get_path(),
-  PathFlag = "-pa " ++ lists:concat(lists:join(" ", CodePath)),
-  {ok, _} = ct_slave:start(NodeName, [{erl_flags, PathFlag}]),
+    %% need to set the code path so the same modules are available in the slave
+    CodePath = code:get_path(),
+    PathFlag =
+        "-pa "
+        ++ lists:concat(
+               lists:join(" ", CodePath)),
+    {ok, _} = ct_slave:start(NodeName, [{erl_flags, PathFlag}]),
 
-  %% set the required environment for riak core
-  DataDir = "./data/" ++ atom_to_list(NodeName),
-  rpc:call(NodeName, application, load, [riak_core]),
-  rpc:call(NodeName, application, set_env, [riak_core, ring_state_dir, DataDir]),
-  rpc:call(NodeName, application, set_env, [riak_core, platform_data_dir, DataDir]),
-  rpc:call(NodeName, application, set_env, [riak_core, web_port, WebPort]),
-  rpc:call(NodeName, application, set_env, [riak_core, handoff_port, HandoffPort]),
-  rpc:call(NodeName, application, set_env, [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
+    %% set the required environment for riak core
+    DataDir = "./data/" ++ atom_to_list(NodeName),
+    rpc:call(NodeName, application, load, [riak_core]),
+    rpc:call(NodeName, application, set_env, [riak_core, ring_state_dir, DataDir]),
+    rpc:call(NodeName, application, set_env, [riak_core, platform_data_dir, DataDir]),
+    rpc:call(NodeName, application, set_env, [riak_core, web_port, WebPort]),
+    rpc:call(NodeName, application, set_env, [riak_core, handoff_port, HandoffPort]),
+    rpc:call(NodeName,
+             application,
+             set_env,
+             [riak_core, schema_dirs, ["../../lib/rc_example/priv"]]),
 
-  %% start the rc_example app
-  {ok, _} = rpc:call(NodeName, application, ensure_all_started, [rc_example]),
+    %% start the rc_example app
+    {ok, _} = rpc:call(NodeName, application, ensure_all_started, [rc_example]),
 
-  ok.
+    ok.
 
 stop_node(NodeName) ->
-  ct_slave:stop(NodeName).
+    ct_slave:stop(NodeName).
 
 build_cluster(Node1, Node2, Node3) ->
-  rpc:call(Node2, riak_core, join, [Node1]),
-  rpc:call(Node3, riak_core, join, [Node1]),
-  ok.
+    rpc:call(Node2, riak_core, join, [Node1]),
+    rpc:call(Node3, riak_core, join, [Node1]),
+    ok.
 
 rc_command(Node, Command) ->
-  rc_command(Node, Command, []).
+    rc_command(Node, Command, []).
+
 rc_command(Node, Command, Arguments) ->
-  rpc:call(Node, rc_example, Command, Arguments).
+    rpc:call(Node, rc_example, Command, Arguments).
 
 rc_coverage(Node, Command) ->
-  {ok, List} = rc_command(Node, Command),
-  %% convert the coverage result to a plain list
-  lists:foldl(fun({_Partition, _Node, Values}, Accum) ->
-                  lists:append(Accum, Values)
-              end, [], List).
+    {ok, List} = rc_command(Node, Command),
+    %% convert the coverage result to a plain list
+    lists:foldl(fun({_Partition, _Node, Values}, Accum) -> lists:append(Accum, Values) end,
+                [],
+                List).
 
 have_same_elements(List1, List2) ->
-  S1 = sets:from_list(List1),
-  S2 = sets:from_list(List2),
-  sets:is_subset(S1, S2) andalso sets:is_subset(S2, S1).
+    S1 = sets:from_list(List1),
+    S2 = sets:from_list(List2),
+    sets:is_subset(S1, S2) andalso sets:is_subset(S2, S1).
